@@ -1,0 +1,10 @@
+.venv
+.git
+.superpowers
+.env
+downloads
+data
+tests
+docs
+**/__pycache__
+.pytest_cache

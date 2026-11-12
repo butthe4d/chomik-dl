@@ -15,6 +15,7 @@ class Settings:
     pause_min: float = 1.0
     pause_max: float = 4.0
     headless: bool = True
+    allowed_hosts: tuple[str, ...] = ()  # hostnames (besides IPs/localhost) the page may be opened by
 
 
 def _bool(value: str) -> bool:
@@ -37,4 +38,5 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         pause_min=float(env.get("HUMAN_PAUSE_MIN", d.pause_min)),
         pause_max=float(env.get("HUMAN_PAUSE_MAX", d.pause_max)),
         headless=_bool(env.get("HEADLESS", "true")),
+        allowed_hosts=tuple(h.strip().lower() for h in env.get("ALLOWED_HOSTS", "").split(",") if h.strip()),
     )

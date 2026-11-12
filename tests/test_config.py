@@ -15,14 +15,16 @@ def test_defaults():
     assert s.min_job_gap == 20.0
     assert (s.pause_min, s.pause_max) == (1.0, 4.0)
     assert s.headless is True
+    assert s.allowed_hosts == ()
 
 
 def test_overrides():
     s = load_settings({
         "CHOMIKUJ_LOGIN": "u", "CHOMIKUJ_PASSWORD": "p",
         "CHOMIKUJ_BASE_URL": "http://127.0.0.1:8765/", "HEADLESS": "false",
-        "MIN_JOB_GAP_SECONDS": "0", "DOWNLOAD_DIR": "/tmp/d",
+        "MIN_JOB_GAP_SECONDS": "0", "DOWNLOAD_DIR": "/tmp/d", "ALLOWED_HOSTS": "homelab.lan, nas.local",
     })
+    assert s.allowed_hosts == ("homelab.lan", "nas.local")
     assert s.base_url == "http://127.0.0.1:8765"
     assert s.headless is False
     assert s.min_job_gap == 0.0

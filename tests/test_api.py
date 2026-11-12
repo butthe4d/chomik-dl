@@ -8,7 +8,8 @@ from app.main import create_app
 
 @pytest.fixture
 def client(tmp_path):
-    settings = Settings(login="u", password="p", download_dir=tmp_path / "dl", data_dir=tmp_path / "data")
+    settings = Settings(login="u", password="p", download_dir=tmp_path / "dl", data_dir=tmp_path / "data",
+                        allowed_hosts=("testserver",))
     with TestClient(create_app(settings, start_worker=False)) as c:
         yield c
 
@@ -58,3 +59,17 @@ def test_same_origin_post_allowed(client):
     r = client.post("/jobs", data={"url": "https://chomikuj.pl/u/f,1.zip"},
                     headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"})
     assert r.status_code == 201
+
+
+@pytest.mark.parametrize("host", ["192.168.1.10:8080", "127.0.0.1:8080", "localhost:8080", "[::1]:8080", "testserver"])
+def test_ip_and_allowed_hosts_accepted(client, host):
+    assert client.get("/jobs", headers={"Host": host}).status_code == 200
+
+
+def test_unknown_hostname_rejected_dns_rebinding(client):
+    # attacker.example resolving to the LAN IP must not reach the app
+    assert client.get("/jobs", headers={"Host": "attacker.example:8080"}).status_code == 400
+    r = client.post("/jobs", data={"url": "https://chomikuj.pl/u/f,1.zip"},
+                    headers={"Host": "attacker.example:8080", "Origin": "http://attacker.example:8080",
+                             "Sec-Fetch-Site": "same-origin"})
+    assert r.status_code == 400

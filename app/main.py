@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import contextlib
 import logging
 from contextlib import asynccontextmanager
@@ -17,6 +18,20 @@ from app.urls import normalize_file_url
 from app.worker import Worker
 
 INDEX_HTML = (Path(__file__).parent / "templates" / "index.html").read_text(encoding="utf-8")
+
+
+def _host_allowed(host_header: str | None, allowed: tuple[str, ...]) -> bool:
+    """Accept IP literals, localhost and configured names only (blocks DNS rebinding)."""
+    if not host_header:
+        return False
+    host = (urlsplit(f"//{host_header}").hostname or "").lower()
+    if host == "localhost" or host in allowed:
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
 
 
 def _same_origin(request: Request) -> bool:
@@ -56,6 +71,12 @@ def create_app(settings: Settings, *, start_worker: bool = True) -> FastAPI:
                 await session.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def check_host(request: Request, call_next):
+        if not _host_allowed(request.headers.get("host"), settings.allowed_hosts):
+            return PlainTextResponse("Invalid host — add it to ALLOWED_HOSTS", status_code=400)
+        return await call_next(request)
 
     @app.get("/", response_class=HTMLResponse)
     async def index():

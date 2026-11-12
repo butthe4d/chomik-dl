@@ -1,0 +1,17 @@
+services:
+  chomik-dl:
+    build: .
+    image: chomik-dl:latest
+    container_name: chomik-dl
+    env_file: .env
+    # Runs as this uid:gid so files in ./downloads belong to you (check with `id -u` / `id -g`).
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ./downloads:/downloads
+      - ./data:/data
+    ports:
+      # Set BIND_ADDR in .env to this machine's LAN IP (e.g. 192.168.1.10). Never 0.0.0.0 on an internet-facing host.
+      - "${BIND_ADDR:-127.0.0.1}:${PORT:-8080}:8080"
+    shm_size: "1gb"
+    init: true
+    restart: unless-stopped
