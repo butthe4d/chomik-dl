@@ -99,3 +99,9 @@ async def test_expired_session_relogs_once(site_settings, fake_state):
     r = await _resolve(site_settings, "/u/f,1.zip")
     assert r.url.endswith("/files/1")
     assert fake_state["logins"] == 2
+
+
+async def test_cookie_consent_accepted_once(site_settings, fake_state):
+    await _resolve(site_settings, "/u/f,1.zip")
+    await _resolve(site_settings, "/u/f,1.zip")
+    assert fake_state["consents"] == 1

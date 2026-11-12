@@ -113,4 +113,5 @@ def create_app(settings: Settings, *, start_worker: bool = True) -> FastAPI:
 def build() -> FastAPI:
     """uvicorn --factory entry point."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines contain signed download URLs
     return create_app(load_settings())

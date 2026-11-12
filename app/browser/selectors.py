@@ -1,7 +1,8 @@
 """Every chomikuj-specific selector and text marker lives here.
 
 Login form ids were confirmed against the live homepage on 2026-11-06.
-The download button / popup markers are best guesses; if a real download
+Login form, consent overlay, Pobierz button and download popup confirmed on
+the live site on 2026-11-12. The out-of-transfer / password texts are best guesses; if a real download
 fails, check /data/last_error.png and adjust only this file.
 """
 import re
@@ -13,13 +14,18 @@ LOGIN_SUBMIT = "#topBar_LoginBtn"
 LOGIN_ERROR = "#topBarLoginError"
 CAPTCHA_MARKER = 'iframe[src*="recaptcha"]:visible, .g-recaptcha:visible'
 
-# File page
-DOWNLOAD_BUTTON = "a.downloadAction"
+# Cookie/terms consent overlay shown to new visitors (live site, 2026-11-12)
+TERMS_ACCEPT = "#AcceptChomikujTermsForm button[type=submit]"
 
-# Popup shown after clicking Pobierz
-DIALOG = '.window:visible, [role="dialog"]:visible, #ChomikujWindow:visible'
+# File page — the main Pobierz button; sidebar "other files" links share the downloadAction class
+DOWNLOAD_BUTTON = 'a.downloadAction[data-analytics-start-location="fileDetails"]'
+
+
+# Popup shown after clicking Pobierz (live site: qtip "#ui-tooltip-DownloadWindow", 2026-11-12)
+DIALOG = "#ui-tooltip-DownloadWindow:visible, .dialogWindow:visible, [role=\"dialog\"]:visible"
 POPUP_CONFIRM_BUTTON = (
-    ':is(.window, [role="dialog"], #ChomikujWindow) '
+    "#downloadWarningForm button[type=submit], "
+    ':is(#ui-tooltip-DownloadWindow, [role="dialog"]) '
     ':is(input[value*="pobierz" i], button:has-text("Pobierz"), a:has-text("Pobierz"))'
 )
 

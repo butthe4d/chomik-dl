@@ -17,6 +17,7 @@ def reset():
     state["tokens"].clear()
     state["logins"] = 0
     state["requests"].clear()
+    state["consents"] = 0
 
 
 def logged_in(request: Request) -> bool:
@@ -41,8 +42,27 @@ def topbar(request: Request, error: str = "", captcha: bool = False) -> str:
     </div>"""
 
 
+CONSENT = """<div id="acceptChomikujTermsOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10">
+  <div id="acceptChomikujTermsContainer" class="dialogWindow" style="background:#fff;margin:200px auto;width:400px">
+    <p>Wykorzystujemy pliki cookies...</p>
+    <form action="/action/ChomikPage/AcceptChomikujTerms" id="AcceptChomikujTermsForm" method="post">
+      <input type="hidden" name="profilingDisabled" value="false">
+      <button type="submit" class="greenButtonCSS">Rozumiem<br>Przechodzę do serwisu</button>
+    </form>
+  </div></div>"""
+
+
 def page(request: Request, body: str, status: int = 200, **kw) -> HTMLResponse:
-    return HTMLResponse(f"<html><body>{topbar(request, **kw)}{body}</body></html>", status_code=status)
+    consent = "" if request.cookies.get("terms") == "1" else CONSENT
+    return HTMLResponse(f"<html><body>{topbar(request, **kw)}{body}{consent}</body></html>", status_code=status)
+
+
+@app.post("/action/ChomikPage/AcceptChomikujTerms")
+async def accept_terms(request: Request):
+    state["consents"] = state.get("consents", 0) + 1
+    resp = RedirectResponse(request.headers.get("referer", "/"), status_code=303)
+    resp.set_cookie("terms", "1", max_age=3600)
+    return resp
 
 
 @app.middleware("http")
@@ -79,17 +99,20 @@ FILES = {
 
 DOWNLOAD_JS = """
 <script>
-document.querySelector('a.downloadAction').addEventListener('click', async (e) => {
+document.querySelector('#fileDetails a.downloadAction').addEventListener('click', async (e) => {
   e.preventDefault();
   const r = await fetch('/action/License/Download?file=' + encodeURIComponent(location.pathname), {method: 'POST'});
   const j = await r.json();
   if (j.redirectUrl) { location.href = j.redirectUrl; return; }
+  // mirrors the live site's qtip popup (2026-11-12)
   const w = document.createElement('div');
-  w.className = 'window'; w.setAttribute('role', 'dialog');
-  w.innerHTML = j.Content;
+  w.id = 'ui-tooltip-DownloadWindow';
+  w.className = 'ui-tooltip qtip dialogWindow'; w.setAttribute('role', 'alert');
+  w.innerHTML = '<div class="ui-tooltip-titlebar"><div class="winChBoxDownload">Pobieranie od tester</div></div>'
+    + '<div class="ui-tooltip-content">' + j.Content + '</div>';
   document.body.appendChild(w);
-  const btn = w.querySelector('#confirmDownload');
-  if (btn) btn.addEventListener('click', () => { location.href = j.confirmUrl; });
+  const form = w.querySelector('#downloadWarningForm');
+  if (form) form.addEventListener('submit', (ev) => { ev.preventDefault(); location.href = j.confirmUrl; });
 });
 </script>"""
 
@@ -98,8 +121,11 @@ document.querySelector('a.downloadAction').addEventListener('click', async (e) =
 async def file_page(request: Request, name: str):
     if name not in FILES:
         return page(request, "<h1>Plik nie istnieje lub został usunięty</h1>", status=404)
-    return page(request, f"""<div id="fileDetails"><h1>{escape(name)}</h1>
-      <a class="downloadAction" href="javascript:;" title="Pobierz">Pobierz</a></div>{DOWNLOAD_JS}""")
+    return page(request, f"""<div id="otherFiles"><a class="expanderHeader downloadAction showDownloadWarning"
+        href="/u/other,9.jpg" data-analytics-start-location="otherFiles">other.jpg</a></div>
+      <div id="fileDetails"><h1>{escape(name)}</h1>
+      <a class="greenButtonCSS downloadContext downloadAction" href="javascript:;" title="Pobierz"
+         data-analytics-start-location="fileDetails">Pobierz</a></div>{DOWNLOAD_JS}""")
 
 
 @app.post("/action/License/Download")
@@ -114,7 +140,12 @@ async def license_download(request: Request, file: str):
     if kind == "password":
         return JSONResponse({"Content": "<p>Ten plik jest chroniony. Podaj hasło do folderu.</p>"})
     return JSONResponse({
-        "Content": '<p>Pobieranie pliku f.zip (16 KB)</p><input type="button" id="confirmDownload" class="greenButtonCSS" value="Pobierz" />',
+        "Content": '<div class="windowFileName">f.zip</div>'
+                   '<form action="/action/License/DownloadWarningAccept" id="downloadWarningForm" method="post">'
+                   '<input id="FileId" name="FileId" type="hidden" value="1">'
+                   '<button type="submit" class="greenButtonCSS left expanderGreenButton">Pobierz</button>'
+                   '<input type="reset" class="greenButtonCSS right smallWindowButton" value="Anuluj"></form>'
+                   '<p>Transfer zostanie odliczony z Twojego konta jednorazowo, zaraz po kliknięciu w przycisk Pobierz.</p>',
         "confirmUrl": "/files/1",
     })
 

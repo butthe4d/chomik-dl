@@ -108,10 +108,10 @@ class BrowserSession:
             await page.close()
 
     async def _resolve(self, page: Page, file_url: str) -> Resolved:
-        resp = await page.goto(file_url, wait_until="domcontentloaded")
+        resp = await self._goto(page, file_url)
         if not await self._logged_in(page):
             await self._login_in_own_tab(file_url)
-            resp = await page.goto(file_url, wait_until="domcontentloaded")
+            resp = await self._goto(page, file_url)
             if not await self._logged_in(page):
                 raise ChomikError("login_failed")
         await human_pause(self.settings)
@@ -136,6 +136,18 @@ class BrowserSession:
             suggested_name=suggested_name_from_url(file_url),
         )
 
+    async def _goto(self, page: Page, url: str):
+        resp = await page.goto(url, wait_until="domcontentloaded")
+        consent = page.locator(f"{sel.TERMS_ACCEPT} >> visible=true")
+        if await consent.count():
+            log.info("accepting cookie consent")
+            await human_pause(self.settings)
+            await consent.first.click()
+            # the site may reload or just hide the overlay; either way it must go away
+            await page.locator(sel.TERMS_ACCEPT).first.wait_for(state="hidden")
+            resp = await page.goto(url, wait_until="domcontentloaded")
+        return resp
+
     async def _logged_in(self, page: Page) -> bool:
         return await page.locator(sel.LOGIN_INPUT).count() == 0
 
@@ -146,7 +158,7 @@ class BrowserSession:
         # Chromium's "save password?" prompt leaves the login tab unclickable, so use a throwaway tab.
         page = await self.new_page()
         try:
-            await page.goto(return_url, wait_until="domcontentloaded")
+            await self._goto(page, return_url)
             if not await self._logged_in(page):
                 await self._login(page)
         except ChomikError:

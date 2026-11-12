@@ -79,11 +79,10 @@ Stop the container, replace `./data/browser` on the homelab with that `browser-p
 
 ### The site changed
 
-All the chomikuj-specific parts are in `app/browser/selectors.py`: the login form ids, the
-Pobierz button, the popup's confirm button, and the text that signals no transfer, a password, or
-a missing file. The login form ids were checked against the live site. The download button and popup
-markers are best guesses until the first real download. If a download fails, look at
-`data/last_error.png` and adjust that file.
+All the chomikuj-specific parts are in `app/browser/selectors.py`. The login form, cookie-consent
+overlay, Pobierz button and download popup were checked against the live site on 2026-11-12 with a
+real download. Two parts are still unverified: the text that signals "no transfer" and the text that
+signals "password needed". If something breaks, look at `data/last_error.png` and adjust that file.
 
 ## Development
 
