@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -16,6 +17,17 @@ from app.urls import normalize_file_url
 from app.worker import Worker
 
 INDEX_HTML = (Path(__file__).parent / "templates" / "index.html").read_text(encoding="utf-8")
+
+
+def _same_origin(request: Request) -> bool:
+    """Block other websites from queuing downloads through the user's browser (CSRF)."""
+    site = request.headers.get("sec-fetch-site")
+    if site is not None and site not in ("same-origin", "none"):
+        return False
+    origin = request.headers.get("origin")
+    if origin is not None and urlsplit(origin).netloc != request.headers.get("host"):
+        return False
+    return True
 
 
 def create_app(settings: Settings, *, start_worker: bool = True) -> FastAPI:
@@ -51,6 +63,8 @@ def create_app(settings: Settings, *, start_worker: bool = True) -> FastAPI:
 
     @app.post("/jobs", status_code=201)
     async def submit(request: Request):
+        if not _same_origin(request):
+            raise HTTPException(status_code=403, detail="Cross-site request rejected")
         if request.headers.get("content-type", "").startswith("application/json"):
             url = (await request.json()).get("url", "")
         else:

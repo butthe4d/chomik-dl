@@ -42,3 +42,19 @@ def test_submit_invalid_url(client):
 
 def test_healthz(client):
     assert client.get("/healthz").text == "ok"
+
+
+def test_cross_site_post_rejected(client):
+    # a random website the user visits must not be able to queue downloads (spends their transfer)
+    r = client.post("/jobs", data={"url": "https://chomikuj.pl/u/f,1.zip"},
+                    headers={"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"})
+    assert r.status_code == 403
+    r = client.post("/jobs", data={"url": "https://chomikuj.pl/u/f,1.zip"}, headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
+    assert client.get("/jobs").json() == []
+
+
+def test_same_origin_post_allowed(client):
+    r = client.post("/jobs", data={"url": "https://chomikuj.pl/u/f,1.zip"},
+                    headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"})
+    assert r.status_code == 201
