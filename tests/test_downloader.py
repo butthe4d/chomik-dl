@@ -89,3 +89,22 @@ async def test_malicious_disposition_stays_inside(tmp_path):
 
     path, _ = await _run(tmp_path, handler)
     assert path == tmp_path / "x"
+
+
+async def test_gzip_encoded_response_is_not_a_failure(tmp_path):
+    import gzip
+
+    body = b"subtitle line\n" * 2000
+    packed = gzip.compress(body)
+
+    def handler(request):
+        if request.headers.get("accept-encoding", "identity") != "identity":
+            return httpx.Response(200, content=packed, headers={
+                "Content-Encoding": "gzip", "Content-Length": str(len(packed)),
+                "Content-Disposition": 'attachment; filename="a.srt"'})
+        return httpx.Response(200, content=body, headers={
+            "Content-Length": str(len(body)), "Content-Disposition": 'attachment; filename="a.srt"'})
+
+    path, calls = await _run(tmp_path, handler)
+    assert path.read_bytes() == body
+    assert calls[-1][1] == calls[-1][2] == len(body)

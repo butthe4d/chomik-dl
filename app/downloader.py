@@ -28,7 +28,9 @@ async def stream_download(
         client = httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(60.0, connect=20.0))
     part: Path | None = None
     try:
-        async with client.stream("GET", url, cookies=cookies, headers=headers) as resp:
+        # identity: Content-Length must match the bytes we write (no transparent gzip)
+        req_headers = {**headers, "Accept-Encoding": "identity"}
+        async with client.stream("GET", url, cookies=cookies, headers=req_headers) as resp:
             if resp.status_code == 404:
                 raise ChomikError("not_found")
             if resp.status_code >= 400:

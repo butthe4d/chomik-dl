@@ -49,3 +49,16 @@ def test_recover_requeues_and_removes_part(tmp_path):
 def test_persists_across_instances(tmp_path):
     JobStore(tmp_path / "j.db").add("u")
     assert len(JobStore(tmp_path / "j.db").list()) == 1
+
+
+def test_recover_marks_finished_file_done_instead_of_redownloading(tmp_path):
+    # crash between rename and status update: file is complete on disk
+    dl = tmp_path / "dl"
+    dl.mkdir()
+    s = JobStore(tmp_path / "j.db")
+    a = s.add("a")
+    s.update(a.id, status="downloading", filename="a.zip", bytes_done=4, bytes_total=4)
+    (dl / "a.zip").write_bytes(b"abcd")
+    assert s.recover(dl) == 0
+    assert s.get(a.id).status == "done"
+    assert (dl / "a.zip").exists()

@@ -81,8 +81,17 @@ class JobStore:
     def recover(self, download_dir: Path) -> int:
         """Requeue jobs interrupted by a restart and remove their partial files."""
         stale = self._query("WHERE status IN ('resolving', 'downloading')")
+        requeued = 0
         for job in stale:
+            final = download_dir / job.filename if job.filename else None
+            if (final and job.bytes_total is not None and final.exists()
+                    and not final.with_name(final.name + ".part").exists()
+                    and final.stat().st_size == job.bytes_total):
+                # finished on disk, crashed before the status update — don't spend transfer again
+                self.update(job.id, status="done", bytes_done=job.bytes_total)
+                continue
+            requeued += 1
             if job.filename:
                 (download_dir / f"{job.filename}.part").unlink(missing_ok=True)
             self.update(job.id, status="queued", bytes_done=0, bytes_total=None, filename=None)
-        return len(stale)
+        return requeued
