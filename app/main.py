@@ -123,7 +123,10 @@ def create_app(settings: Settings, *, start_worker: bool = True, lookup=lookup_f
 
     async def read_body(request: Request) -> dict:
         if request.headers.get("content-type", "").startswith("application/json"):
-            data = await request.json()
+            try:
+                data = await request.json()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid request body")
             return data if isinstance(data, dict) else {}
         return dict(await request.form())
 

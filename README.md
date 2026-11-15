@@ -46,7 +46,7 @@ On the admin page you can:
 
 - press **Akceptuj** or **Odrzuć** on waiting requests,
 - press **Ponów** on failed ones,
-- paste a link into the field at the top to download it right away, without a request.
+- paste a link into the field at the top to add it as an already-approved download, without a request. If the file was already downloaded it is merged into the existing entry, and a matching waiting request is promoted to queued.
 
 ## Setup
 

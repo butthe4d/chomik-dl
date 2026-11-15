@@ -135,7 +135,10 @@ class JobStore:
         return rows[0] if rows else None
 
     def list(self, limit: int = 100) -> list[Job]:
-        return self._query("ORDER BY id DESC LIMIT ?", (limit,))
+        """Newest `limit` rows plus every waiting row (so pending requests never drop off), newest first."""
+        return self._query(
+            "WHERE status = 'waiting' OR id IN (SELECT id FROM jobs ORDER BY id DESC LIMIT ?) ORDER BY id DESC",
+            (limit,))
 
     def next_queued(self) -> Job | None:
         rows = self._query("WHERE status = 'queued' ORDER BY id ASC LIMIT 1")

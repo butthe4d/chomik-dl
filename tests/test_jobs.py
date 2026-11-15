@@ -176,3 +176,15 @@ def test_request_for_done_file_merges(tmp_path):
     job, created = s.add_request(URL, _info(), None, status="queued")
     assert created is False and job.status == "done"
     assert len(s.list()) == 1
+
+
+def test_list_always_includes_waiting_beyond_limit(tmp_path):
+    s = JobStore(tmp_path / "j.db")
+    old = make_job(s, "https://chomikuj.pl/u/f,1.zip", status="waiting")
+    for i in range(105):
+        make_job(s, f"https://chomikuj.pl/u/f,{i + 2}.zip", status="done")
+    rows = s.list()
+    assert len(rows) == 101
+    assert old.id in [j.id for j in rows]
+    ids = [j.id for j in rows]
+    assert ids == sorted(ids, reverse=True) and len(set(ids)) == len(ids)

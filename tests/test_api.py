@@ -245,3 +245,18 @@ def test_access_log_filter_redacts_admin_token():
                             ("h", "POST", "/admin/requests/3/accept", "1.1", 200), None)
     RedactAdminToken().filter(rec)
     assert "/admin/requests/3/accept" in rec.getMessage()
+
+
+def test_requests_list_includes_old_waiting(client):
+    store = client.app.state.store
+    old = make_job(store, "https://chomikuj.pl/u/f,1.zip", status="waiting")
+    for i in range(105):
+        make_job(store, f"https://chomikuj.pl/u/f,{i + 2}.zip", status="done")
+    ids = [r["id"] for r in client.get("/requests").json()]
+    assert old.id in ids and len(ids) == 101
+
+
+def test_malformed_json_body_is_400(client):
+    r = client.post("/requests", content=b"{not json", headers={"content-type": "application/json"})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "Invalid request body"
