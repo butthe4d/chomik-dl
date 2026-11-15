@@ -41,3 +41,10 @@ def test_error_message():
     assert ChomikError("captcha").code == "captcha"
     with pytest.raises(KeyError):
         ChomikError("nope")
+
+
+def test_public_url():
+    base = {"CHOMIKUJ_LOGIN": "u", "CHOMIKUJ_PASSWORD": "p"}
+    assert load_settings(base).public_url is None
+    assert load_settings({**base, "PUBLIC_URL": "http://h:8080/"}).public_url == "http://h:8080"
+    assert load_settings({**base, "PUBLIC_URL": ""}).public_url is None
