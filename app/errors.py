@@ -4,6 +4,8 @@ MESSAGES: dict[str, str] = {
     "captcha": "Login needs captcha — log in manually (see README)",
     "out_of_transfer": "Out of transfer on this account",
     "password_protected": "File is password-protected",
+    "adult_content": "File is behind an adult-content gate",
+    "unavailable": "chomikuj is not reachable right now",
     "not_found": "File not found or removed",
     "timeout": "chomikuj did not respond in time",
     "download_failed": "Download interrupted",

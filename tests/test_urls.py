@@ -36,3 +36,9 @@ def test_rejects(url):
 def test_local_base_keeps_scheme_and_port():
     base = "http://127.0.0.1:8765"
     assert normalize_file_url("http://127.0.0.1:8765/u/f,9.pdf", base) == "http://127.0.0.1:8765/u/f,9.pdf"
+
+
+def test_file_id_from_url():
+    from app.urls import file_id_from_url
+    assert file_id_from_url("https://chomikuj.pl/u/Folder/f,9.pdf") == 9
+    assert file_id_from_url("https://chomikuj.pl/user") is None
