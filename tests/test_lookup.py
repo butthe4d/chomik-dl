@@ -110,3 +110,8 @@ async def test_lookup_timeout():
         with pytest.raises(ChomikError) as e:
             await lookup_file(PIRAT, client=c)
     assert e.value.code == "unavailable"
+
+
+def test_gate_error_messages():
+    assert ChomikError("unavailable").message == "chomikuj is not responding, try again later"
+    assert ChomikError("adult_content").message == "File is behind an adult-content check"
