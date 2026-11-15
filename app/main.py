@@ -14,7 +14,8 @@ from app.browser.session import BrowserSession
 from app.config import Settings, load_settings
 from app.errors import ChomikError
 from app.jobs import JobStore
-from app.urls import normalize_file_url
+from app.lookup import FileInfo
+from app.urls import file_id_from_url, normalize_file_url, suggested_name_from_url
 from app.worker import Worker
 
 INDEX_HTML = (Path(__file__).parent / "templates" / "index.html").read_text(encoding="utf-8")
@@ -94,7 +95,10 @@ def create_app(settings: Settings, *, start_worker: bool = True) -> FastAPI:
             normalized = normalize_file_url(str(url), settings.base_url)
         except ChomikError as err:
             raise HTTPException(status_code=400, detail=err.message)
-        job = store.add(normalized)
+        # temporary bridge until the approval routes replace this handler
+        info = FileInfo(file_id=file_id_from_url(normalized), name=suggested_name_from_url(normalized),
+                        size_text=None, size_bytes=None, description=None, folder=None)
+        job, _ = store.add_request(normalized, info, None, status="queued")
         if "worker" in state:
             state["worker"].wake()
         return asdict(job)
