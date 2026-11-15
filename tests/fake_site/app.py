@@ -124,6 +124,8 @@ async def file_page(request: Request, name: str):
     return page(request, f"""<div id="otherFiles"><a class="expanderHeader downloadAction showDownloadWarning"
         href="/u/other,9.jpg" data-analytics-start-location="otherFiles">other.jpg</a></div>
       <div id="fileDetails"><h1>{escape(name)}</h1>
+      <div class="fileInfo"><p class="fileSize">16 KB</p></div>
+      <div class="filedescription" itemprop="description">opis<br>linia 2</div>
       <a class="greenButtonCSS downloadContext downloadAction" href="javascript:;" title="Pobierz"
          data-analytics-start-location="fileDetails">Pobierz</a></div>{DOWNLOAD_JS}""")
 
