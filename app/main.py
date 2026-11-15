@@ -1,5 +1,6 @@
 import asyncio
 import ipaddress
+import re
 import contextlib
 import logging
 from contextlib import asynccontextmanager
@@ -32,6 +33,21 @@ BOUNCE_HTML = (
     '<noscript><a href="/admin">Przejdź do panelu</a></noscript>'
     '<p><a href="/admin">Przejdź do panelu</a></p></body></html>'
 )
+
+
+class RedactAdminToken(logging.Filter):
+    """Keep the secret admin token out of access logs: /admin/<token> -> /admin/<redacted>."""
+
+    _PATTERN = re.compile(r"/admin/(?!requests(?:/|$))[^/\s?\"]+")
+
+    def _clean(self, value):
+        return self._PATTERN.sub("/admin/<redacted>", value) if isinstance(value, str) else value
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = self._clean(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._clean(a) for a in record.args)
+        return True
 
 
 def _host_allowed(host_header: str | None, allowed: tuple[str, ...]) -> bool:
@@ -205,5 +221,6 @@ def create_app(settings: Settings, *, start_worker: bool = True, lookup=lookup_f
 def build() -> FastAPI:
     """uvicorn --factory entry point."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("uvicorn.access").addFilter(RedactAdminToken())
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines contain signed download URLs
     return create_app(load_settings())

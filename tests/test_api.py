@@ -231,3 +231,17 @@ def test_regenerated_token_takes_effect(client):
     assert client.get(f"/admin/{old}").status_code == 404
     assert client.get(f"/admin/{new}").status_code == 200
     assert client.get("/admin").status_code == 200
+
+
+def test_access_log_filter_redacts_admin_token():
+    import logging
+    from app.main import RedactAdminToken
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                            ("127.0.0.1:5000", "GET", "/admin/SECRETTOKEN", "1.1", 200), None)
+    assert RedactAdminToken().filter(rec)
+    assert "SECRETTOKEN" not in rec.getMessage()
+    assert "/admin/<redacted>" in rec.getMessage()
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                            ("h", "POST", "/admin/requests/3/accept", "1.1", 200), None)
+    RedactAdminToken().filter(rec)
+    assert "/admin/requests/3/accept" in rec.getMessage()
