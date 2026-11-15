@@ -29,7 +29,7 @@ class Job:
     requested_by: str
 
 
-_ACTIVE = ("waiting", "queued", "resolving", "downloading")
+_ACTIVE = ("waiting", "queued", "resolving", "downloading", "done")
 _NEW_COLUMNS = {
     "file_id": "INTEGER",
     "name": "TEXT",

@@ -164,3 +164,15 @@ def test_v1_database_migrates(tmp_path):
     assert jobs[11].name == "Plik a.zip" and jobs[11].requested_by == "" and jobs[11].status == "done"
     assert s.next_queued().file_id == 12
     JobStore(path)  # reopening an already migrated db is a no-op
+
+
+def test_request_for_done_file_merges(tmp_path):
+    s = JobStore(tmp_path / "j.db")
+    first, _ = s.add_request(URL, _info(), "Ania")
+    s.update(first.id, status="done")
+    job, created = s.add_request(URL, _info(), "Tomek")
+    assert created is False and job.id == first.id
+    assert job.status == "done" and job.requested_by == "Ania, Tomek"
+    job, created = s.add_request(URL, _info(), None, status="queued")
+    assert created is False and job.status == "done"
+    assert len(s.list()) == 1
