@@ -8,13 +8,14 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.browser.session import BrowserSession
 from app.config import Settings, load_settings
 from app.errors import ChomikError
 from app.jobs import JobStore
-from app.admin import admin_link, load_or_create_token, token_matches, write_link_file
+from app.admin import TOKEN_FILE, admin_link, load_or_create_token, token_matches, write_link_file
 from app.lookup import lookup_file
 from app.ratelimit import RateLimiter
 from app.urls import normalize_file_url
@@ -23,6 +24,14 @@ from app.worker import Worker
 INDEX_HTML = (Path(__file__).parent / "templates" / "index.html").read_text(encoding="utf-8")
 ADMIN_HTML = (Path(__file__).parent / "templates" / "admin.html").read_text(encoding="utf-8")
 COOKIE = "chomikdl_admin"
+STATIC_DIR = Path(__file__).parent / "static"
+BOUNCE_HTML = (
+    '<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">'
+    "<title>chomik-dl</title></head><body>"
+    "<script>location.replace('/admin')</script>"
+    '<noscript><a href="/admin">Przejdź do panelu</a></noscript>'
+    '<p><a href="/admin">Przejdź do panelu</a></p></body></html>'
+)
 
 
 def _host_allowed(host_header: str | None, allowed: tuple[str, ...]) -> bool:
@@ -59,10 +68,12 @@ def create_app(settings: Settings, *, start_worker: bool = True, lookup=lookup_f
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings.download_dir.mkdir(parents=True, exist_ok=True)
-        state["token"] = load_or_create_token(settings.data_dir)
-        link = admin_link(state["token"], settings.public_url)
-        write_link_file(settings.data_dir, link)
-        logging.getLogger(__name__).info("Admin link: %s", link)
+        token = load_or_create_token(settings.data_dir)
+        path = write_link_file(settings.data_dir, admin_link(token, settings.public_url))
+        log = logging.getLogger(__name__)
+        log.info("Admin link saved to %s — print it with: python -m app.admin", path)
+        if settings.public_url is None:
+            log.info("Set PUBLIC_URL (e.g. http://192.168.1.10:8080) to get a full admin link")
         recovered = store.recover(settings.download_dir)
         if recovered:
             logging.getLogger(__name__).info("requeued %d interrupted job(s)", recovered)
@@ -101,7 +112,14 @@ def create_app(settings: Settings, *, start_worker: bool = True, lookup=lookup_f
         return dict(await request.form())
 
     def is_admin(request: Request) -> bool:
-        return token_matches(state["token"], request.cookies.get(COOKIE))
+        return token_matches(current_token(), request.cookies.get(COOKIE))
+
+    def current_token() -> str:
+        """Read per check so `python -m app.admin --regenerate` takes effect without a restart."""
+        try:
+            return (settings.data_dir / TOKEN_FILE).read_text().strip()
+        except OSError:
+            return ""
 
     def require_same_origin(request: Request) -> None:
         if not _same_origin(request):
@@ -142,10 +160,13 @@ def create_app(settings: Settings, *, start_worker: bool = True, lookup=lookup_f
 
     @app.get("/admin/{token}")
     async def admin_login(token: str):
-        if not token_matches(state["token"], token):
+        expected = current_token()
+        if not token_matches(expected, token):
             raise HTTPException(status_code=404)
-        resp = RedirectResponse("/admin", status_code=303)
-        resp.set_cookie(COOKIE, state["token"], max_age=31536000, httponly=True, samesite="strict", path="/")
+        # A 303 would not carry the SameSite=Strict cookie when the link was opened from another site,
+        # so answer 200 and navigate client-side (a same-site navigation) instead.
+        resp = HTMLResponse(BOUNCE_HTML, headers={"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
+        resp.set_cookie(COOKIE, expected, max_age=31536000, httponly=True, samesite="strict", path="/")
         return resp
 
     @app.get("/admin", response_class=HTMLResponse)
@@ -171,6 +192,8 @@ def create_app(settings: Settings, *, start_worker: bool = True, lookup=lookup_f
 
     for _action in ("accept", "reject", "retry"):
         app.post(f"/admin/requests/{{job_id}}/{_action}")(transition(_action))
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/healthz", response_class=PlainTextResponse)
     async def healthz():

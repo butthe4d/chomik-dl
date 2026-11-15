@@ -3,7 +3,7 @@ from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 from app.errors import ChomikError
 
-_FILE_SEGMENT = re.compile(r",\d+\.[^/]+$")
+_FILE_SEGMENT = re.compile(r",(\d+)\.[^/,]+$")
 
 
 def normalize_file_url(url: str, base_url: str) -> str:
@@ -27,13 +27,10 @@ def normalize_file_url(url: str, base_url: str) -> str:
     return urlunsplit((base.scheme, base.netloc, parts.path, "", ""))
 
 
-_FILE_ID = re.compile(r",(\d+)\.")
-
-
 def file_id_from_url(url: str) -> int | None:
     """Numeric file id from the last path segment ('…/name,123.mp3' -> 123)."""
     last = unquote_plus(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1])
-    m = _FILE_ID.search(last)
+    m = _FILE_SEGMENT.search(last)
     return int(m.group(1)) if m else None
 
 

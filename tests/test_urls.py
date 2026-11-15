@@ -42,3 +42,9 @@ def test_file_id_from_url():
     from app.urls import file_id_from_url
     assert file_id_from_url("https://chomikuj.pl/u/Folder/f,9.pdf") == 9
     assert file_id_from_url("https://chomikuj.pl/user") is None
+
+
+def test_file_id_uses_last_anchored_id():
+    from app.urls import file_id_from_url
+    assert file_id_from_url("https://chomikuj.pl/u/a,1.b,2.zip") == 2
+    assert file_id_from_url("https://chomikuj.pl/u/a%2C1.b%2C2.zip") == 2

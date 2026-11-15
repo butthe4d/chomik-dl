@@ -37,7 +37,7 @@ def client(tmp_path):
 def admin(client):
     token = load_or_create_token(client.settings.data_dir)
     r = client.get(f"/admin/{token}")
-    assert r.status_code == 303
+    assert r.status_code == 200
     return client
 
 
@@ -151,8 +151,10 @@ def test_admin_access(client):
     assert client.get("/admin/wrong").status_code == 404
     token = load_or_create_token(client.settings.data_dir)
     r = client.get(f"/admin/{token}")
-    assert r.status_code == 303
-    assert r.headers["location"] == "/admin"
+    assert r.status_code == 200
+    assert "location.replace('/admin')" in r.text
+    assert r.headers["referrer-policy"] == "no-referrer"
+    assert r.headers["cache-control"] == "no-store"
     cookie = r.headers["set-cookie"]
     assert "chomikdl_admin" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie
     assert "Max-Age=31536000" in cookie and "Path=/" in cookie
@@ -196,5 +198,36 @@ def test_admin_link_written(client):
 
 def test_pages_use_textcontent_only():
     from pathlib import Path
-    for name in ("index.html", "admin.html"):
-        assert "innerHTML" not in (Path("app/templates") / name).read_text(encoding="utf-8")
+    files = [*Path("app/templates").glob("*.html"), *Path("app/static").glob("*.js")]
+    assert len(files) >= 3
+    for f in files:
+        assert "innerHTML" not in f.read_text(encoding="utf-8")
+
+
+def test_static_assets_served(client):
+    assert client.get("/static/requests.js").status_code == 200
+    assert client.get("/static/style.css").status_code == 200
+
+
+def test_startup_log_has_no_token(tmp_path, caplog):
+    import logging
+    c, settings, _ = make_client(tmp_path)
+    with caplog.at_level(logging.DEBUG):
+        with c:
+            token = load_or_create_token(settings.data_dir)
+    assert token not in caplog.text
+    assert "admin-link.txt" in caplog.text and "PUBLIC_URL" in caplog.text
+
+
+def test_regenerated_token_takes_effect(client):
+    from app.admin import regenerate_token
+    old = load_or_create_token(client.settings.data_dir)
+    assert client.get(f"/admin/{old}").status_code == 200
+    assert client.get("/admin").status_code == 200
+    job = make_job(client.app.state.store, URL, status="waiting")
+    new = regenerate_token(client.settings.data_dir)
+    assert client.get("/admin").status_code == 404
+    assert client.post(f"/admin/requests/{job.id}/accept").status_code == 403
+    assert client.get(f"/admin/{old}").status_code == 404
+    assert client.get(f"/admin/{new}").status_code == 200
+    assert client.get("/admin").status_code == 200
