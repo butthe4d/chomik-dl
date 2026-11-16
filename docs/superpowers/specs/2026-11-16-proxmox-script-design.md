@@ -1,7 +1,7 @@
 # chomik-dl — Proxmox community-script install (step 2 of 2)
 
 Date: 2026-11-16
-Status: draft — awaiting user approval
+Status: approved (user, 2026-11-16)
 
 ## Intent
 
