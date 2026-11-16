@@ -33,3 +33,10 @@ POPUP_CONFIRM_BUTTON = (
 TEXT_OUT_OF_TRANSFER = re.compile(r"(brak|za mało|niewystarczając\w*)[^.]{0,60}transfer", re.I)
 TEXT_PASSWORD = re.compile(r"(podaj|wpisz|chronion\w*)[^.]{0,40}hasł|hasło do", re.I)
 TEXT_NOT_FOUND = re.compile(r"nie istnieje|został\w* usunięt|nie znaleziono|nie został\w* znalezion", re.I)
+
+# Logged-out file page lookup (fixtures in tests/fixtures, 2026-11-15)
+LOOKUP_NAME = "#fileDetails h1"
+LOOKUP_SIZE = "#fileDetails .fileInfo .fileSize"
+LOOKUP_DESCRIPTION = "#fileDetails .filedescription"
+LOOKUP_FOLDER = "#fileDetails .folder"
+TEXT_ADULT = re.compile(r"pełnoletn|ukończył\w* 18|treści dla dorosłych|tylko dla dorosłych", re.I)

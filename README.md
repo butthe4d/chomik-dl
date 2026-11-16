@@ -1,14 +1,52 @@
 # chomik-dl
 
-A small background downloader for chomikuj.pl, meant for a homelab. Open the page, paste a link to a
-file page (for example `https://chomikuj.pl/user/Folder/plik,123456.rar(archive)`), and press **Pobierz**.
-The server logs in with your account, goes through *Pobierz → popup → Pobierz* in a headless browser,
-and saves the file to `./downloads`.
+A small background downloader for chomikuj.pl, meant for a homelab. Family members ask for a file,
+and one admin approves it. Nothing downloads until the admin says yes.
 
+## How it works
+
+1. A family member opens the page, pastes a link to a file page (for example
+   `https://chomikuj.pl/user/Folder/plik,123456.rar(archive)`), adds an optional name, and sends it.
+2. The app looks up the file's name, size and description on the public page. This uses no transfer.
+   The request then waits for approval. If two people ask for the same file, their names are merged.
+3. The admin opens the admin page and presses **Akceptuj** to download or **Odrzuć** to refuse.
+4. The server logs in with your account, goes through *Pobierz → popup → Pobierz* in a headless
+   browser, and saves the file to `./downloads`.
+
+- Status labels on the pages are in Polish.
+- Each device can send 10 requests per minute.
 - Downloads run one at a time. The page shows each one's status and progress.
 - A download goes to `name.part` first and gets its real name only when it's complete.
 - Failures show a reason: out of transfer, file needs a password, login failed or needs a captcha,
   file removed, or timeout.
+
+## Admin link
+
+The admin page is behind a secret link. The startup log does not print it. It says where the link is
+saved: `data/admin-link.txt`. To print it:
+
+```bash
+docker compose exec chomik-dl python -m app.admin
+```
+
+Open the link once. It sets a cookie in that browser, and after that `http://<host>:8080/admin` works
+there without the link. Don't share the link.
+
+Set `PUBLIC_URL` in `.env` (for example `http://192.168.1.10:8080`) so the printed link is complete.
+
+If the link leaks, make a new one:
+
+```bash
+docker compose exec chomik-dl python -m app.admin --regenerate
+```
+
+This takes effect at once. The old link and all admin cookies stop working.
+
+On the admin page you can:
+
+- press **Akceptuj** or **Odrzuć** on waiting requests,
+- press **Ponów** on failed ones,
+- paste a link into the field at the top to add it as an already-approved download, without a request. If the file was already downloaded it is merged into the existing entry, and a matching waiting request is promoted to queued.
 
 ## Setup
 
@@ -25,9 +63,10 @@ Open `http://<BIND_ADDR>:8080`. To open it by a hostname instead, for example `h
 add that name to `ALLOWED_HOSTS` in `.env`. Any name not listed there is rejected, which protects
 against DNS-rebinding attacks.
 
-The page has no password. Only your network is supposed to reach it, so keep `BIND_ADDR` on a LAN
+The family page has no password, and the admin page is protected only by the secret link. Only your
+network is supposed to reach them, so keep `BIND_ADDR` on a LAN
 address and never port-forward it. Requests from other websites are rejected, so a page you visit
-can't queue downloads behind your back.
+can't queue requests or approve them behind your back.
 
 Logs: `docker compose logs -f`.
 
@@ -81,7 +120,8 @@ Stop the container, replace `./data/browser` on the homelab with that `browser-p
 
 All the chomikuj-specific parts are in `app/browser/selectors.py`. The login form, cookie-consent
 overlay, Pobierz button and download popup were checked against the live site on 2026-11-12 with a
-real download. Two parts are still unverified: the text that signals "no transfer" and the text that
+real download. The lookup selectors (`LOOKUP_*`, for name, size and description on the logged-out
+file page) were checked on 2026-11-15 against saved pages, kept in `tests/fixtures/`. Two parts are still unverified: the text that signals "no transfer" and the text that
 signals "password needed". If something breaks, look at `data/last_error.png` and adjust that file.
 
 ## Development
@@ -92,4 +132,4 @@ python -m venv .venv && .venv/bin/pip install -e '.[dev]' && .venv/bin/playwrigh
 ```
 
 The browser tests run against a local fake chomikuj (`tests/fake_site/`) that mirrors the selectors,
-so no account is needed.
+so no account is needed. The lookup tests use the saved pages in `tests/fixtures/`.

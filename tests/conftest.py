@@ -7,6 +7,8 @@ import pytest
 import uvicorn
 
 from app.config import Settings
+from app.lookup import FileInfo
+from app.urls import file_id_from_url, suggested_name_from_url
 from tests.fake_site import app as fake
 
 
@@ -47,3 +49,11 @@ def site_settings(tmp_path, fake_site_url, fake_state):
 @pytest.fixture
 def make_settings(site_settings):
     return lambda **kw: replace(site_settings, **kw)
+
+
+def make_job(store, url, status="queued", requested_by=None):
+    """Create a job row without any network lookup."""
+    info = FileInfo(file_id=file_id_from_url(url), name=suggested_name_from_url(url),
+                    size_text=None, size_bytes=None, description=None, folder=None)
+    job, _ = store.add_request(url, info, requested_by, status=status)
+    return job

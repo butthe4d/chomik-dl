@@ -6,6 +6,7 @@ from app.browser.session import Resolved
 from app.config import Settings
 from app.errors import MESSAGES, ChomikError
 from app.jobs import JobStore
+from tests.conftest import make_job
 from app.worker import Worker
 
 
@@ -38,7 +39,7 @@ async def fake_download(url, *, cookies, headers, dest_dir, fallback_name, on_pr
 
 async def test_success(env):
     settings, store = env
-    job = store.add("https://chomikuj.pl/u/f,1.zip")
+    job = make_job(store, "https://chomikuj.pl/u/f,1.zip")
     w = Worker(settings, store, FakeSession(), download=fake_download, retry_backoff=0)
     assert await w.run_once() is True
     got = store.get(job.id)
@@ -53,7 +54,7 @@ async def test_empty_queue(env):
 
 async def test_captcha_fails_without_retry(env):
     settings, store = env
-    job = store.add("u")
+    job = make_job(store, "u")
     session = FakeSession(errors=["captcha"])
     w = Worker(settings, store, session, download=fake_download, retry_backoff=0)
     await w.run_once()
@@ -65,7 +66,7 @@ async def test_captcha_fails_without_retry(env):
 
 async def test_timeout_retried_once_then_succeeds(env):
     settings, store = env
-    job = store.add("u")
+    job = make_job(store, "u")
     w = Worker(settings, store, FakeSession(errors=["timeout"]), download=fake_download, retry_backoff=0)
     await w.run_once()
     assert store.get(job.id).status == "queued"
@@ -76,7 +77,7 @@ async def test_timeout_retried_once_then_succeeds(env):
 
 async def test_timeout_twice_fails(env):
     settings, store = env
-    job = store.add("u")
+    job = make_job(store, "u")
     w = Worker(settings, store, FakeSession(errors=["timeout", "timeout"]), download=fake_download, retry_backoff=0)
     await w.run_once()
     await w.run_once()
@@ -86,7 +87,7 @@ async def test_timeout_twice_fails(env):
 
 async def test_unexpected_exception_marks_failed(env):
     settings, store = env
-    job = store.add("u")
+    job = make_job(store, "u")
 
     async def boom(*a, **kw):
         raise RuntimeError("bug")

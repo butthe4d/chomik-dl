@@ -6,9 +6,7 @@ app.downloader with the cookies/headers returned here.
 import asyncio
 import logging
 import random
-import re
 from dataclasses import dataclass
-from urllib.parse import unquote_plus, urlsplit
 
 from playwright.async_api import BrowserContext, Download, Page, Playwright, async_playwright
 from playwright.async_api import Error as PlaywrightError
@@ -18,6 +16,7 @@ from app.browser import selectors as sel
 from app.config import Settings
 from app.errors import ChomikError
 from app.humanize import human_pause
+from app.urls import suggested_name_from_url  # noqa: F401  (re-exported)
 
 log = logging.getLogger(__name__)
 
@@ -36,13 +35,6 @@ class Resolved:
     cookies: dict[str, str]
     headers: dict[str, str]
     suggested_name: str
-
-
-def suggested_name_from_url(file_url: str) -> str:
-    """'…/Moje+pliki/Nazwa+pliku,123.mp3(audio)' -> 'Nazwa pliku.mp3'."""
-    last = unquote_plus(urlsplit(file_url).path.rstrip("/").rsplit("/", 1)[-1])
-    last = re.sub(r"\([^()]*\)$", "", last)
-    return re.sub(r",\d+(?=\.[^.]+$)", "", last)
 
 
 def chrome_user_agent(browser_version: str) -> str:

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chomik-dl · admin</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main data-post="/admin/requests" data-admin="1">
+  <h1>chomik-dl · admin</h1>
+  <form id="f">
+    <input name="url" type="url" required placeholder="https://chomikuj.pl/…/plik,123.rar" autocomplete="off" autofocus>
+    <button type="submit">Pobierz od razu</button>
+  </form>
+  <div id="msg" role="status"></div>
+  <ul id="jobs"></ul>
+</main>
+<script src="/static/requests.js"></script>
+</body>
+</html>
