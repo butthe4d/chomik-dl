@@ -88,12 +88,14 @@ The installer asks for:
 - your chomikuj.pl login and password (the password is not shown),
 - `PUBLIC_URL`, the address you open chomik-dl at (default `http://<container-IP>:8080`),
 - `ALLOWED_HOSTS`, extra host names the page may be opened by (optional),
-- the minimum gap between downloads and the two pauses between browser actions,
+- optionally, the minimum gap between downloads and the two pauses between browser actions (these questions only appear after you answer yes to "Change the download pacing (advanced)?"),
 - the update channel: `main` (every commit, the default) or `releases` (tagged releases).
 
 For an unattended install, set `CHOMIKDL_LOGIN` and `CHOMIKDL_PASSWORD` in the environment.
 If you give no login and password, chomik-dl is installed but left stopped. Run
 `chomik-dl-settings` in the container to enter them. It then starts the service.
+If nobody answers the login question within the timeout, the remaining questions are skipped.
+The service is installed but left stopped until `chomik-dl-settings` sets the login.
 
 At the end the script prints the page address, the admin link command and the NAS hint below.
 
@@ -233,7 +235,7 @@ Keep the volume low.
 | File not found or removed | Check the link in a normal browser. |
 | chomikuj did not respond in time / Download interrupted | The job was already retried once, so submit it again later. |
 
-Every failure saves a screenshot of what the browser saw to `./data/last_error.png`.
+Every failure saves a screenshot of what the browser saw to `./data/last_error.png` (Docker) or `/var/lib/chomik-dl/last_error.png` (Proxmox).
 
 ### Logging in by hand (captcha)
 

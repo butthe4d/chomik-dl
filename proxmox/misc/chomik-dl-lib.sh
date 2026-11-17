@@ -780,7 +780,7 @@ cd_build_ref() {
       python3 -m venv "$stage/.venv" &&
         "$stage/.venv/bin/python" -m pip install -q "$stage" &&
         _cd_ensure_libatomic &&
-        "$stage/.venv/bin/python" -m playwright install --with-deps chromium &&
+        "$stage/.venv/bin/python" -m playwright install --with-deps --no-shell chromium &&
         "$stage/.venv/bin/python" -c "import app.main"
     ) >>"$log" 2>&1 || rc=1
   fi
@@ -815,7 +815,7 @@ cd_prune_browsers() {
   local log
   log="$(mktemp)" || return 0
   if ! (cd / && env -u PLAYWRIGHT_SKIP_BROWSER_GC PLAYWRIGHT_BROWSERS_PATH="$CD_BROWSERS_DIR" \
-    "$CD_APP_DIR/.venv/bin/python" -m playwright install chromium) >"$log" 2>&1; then
+    "$CD_APP_DIR/.venv/bin/python" -m playwright install --no-shell chromium) >"$log" 2>&1; then
     cd_err "Warning: could not remove unused browsers from $CD_BROWSERS_DIR:"
     tail -n 5 "$log" >&2
   fi

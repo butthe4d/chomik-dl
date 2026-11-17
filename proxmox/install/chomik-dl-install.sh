@@ -106,7 +106,11 @@ if [[ $have_credentials == 1 ]]; then
   systemctl daemon-reload
   systemctl reset-failed "$CD_SERVICE" 2>/dev/null || true
   systemctl enable -q --now "$CD_SERVICE"
-  cd_health 90
+  cd_health 90 || {
+    msg_error "chomik-dl did not start; last service log lines:"
+    journalctl -u "$CD_SERVICE" -n 40 --no-pager >&2 || true
+    exit 1
+  }
   msg_ok "Started chomik-dl"
   # The admin token is created on first use; the link goes to a 600 file.
   cd_write_creds
