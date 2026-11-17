@@ -779,6 +779,7 @@ cd_build_ref() {
         PLAYWRIGHT_SKIP_BROWSER_GC=1
       python3 -m venv "$stage/.venv" &&
         "$stage/.venv/bin/python" -m pip install -q "$stage" &&
+        _cd_ensure_libatomic &&
         "$stage/.venv/bin/python" -m playwright install --with-deps chromium &&
         "$stage/.venv/bin/python" -c "import app.main"
     ) >>"$log" 2>&1 || rc=1
@@ -794,6 +795,14 @@ cd_build_ref() {
     rm -rf "$stage"
     return 1
   fi
+}
+
+# Playwright's bundled node needs libatomic.so.1, which a bare Debian lacks;
+# `playwright install --with-deps` runs that node before installing anything,
+# so it cannot pull the library in itself.
+_cd_ensure_libatomic() {
+  ldconfig -p 2>/dev/null | grep -qF 'libatomic.so.1 ' && return 0
+  apt-get update -qq && apt-get install -y -qq libatomic1
 }
 
 # cd_prune_browsers: remove the Chromium builds in CD_BROWSERS_DIR that the

@@ -26,7 +26,9 @@ fetch_misc() { # name destination mode
 }
 
 msg_info "Installing Dependencies"
-$STD apt-get install -y python3 python3-venv git sqlite3 curl ca-certificates whiptail
+# libatomic1: Playwright's bundled node needs it; hostname: `hostname -I`
+# gives the default PUBLIC_URL.
+$STD apt-get install -y python3 python3-venv git sqlite3 curl ca-certificates whiptail libatomic1 hostname
 msg_ok "Installed Dependencies"
 
 msg_info "Installing chomik-dl helpers"
@@ -44,7 +46,8 @@ if ! id -u "$CD_USER" &>/dev/null; then
     exit 1
   fi
   groupadd --gid "$CD_UID" "$CD_USER"
-  useradd --system --uid "$CD_UID" --gid "$CD_UID" --home-dir "$CD_DATA_DIR" --no-create-home \
+  # SYS_UID_MAX: a system account above the usual system range, without a warning.
+  useradd --system -K SYS_UID_MAX="$CD_UID" --uid "$CD_UID" --gid "$CD_UID" --home-dir "$CD_DATA_DIR" --no-create-home \
     --shell /usr/sbin/nologin "$CD_USER"
 fi
 install -d -o "$CD_USER" -g "$CD_USER" -m 750 "$CD_DATA_DIR"

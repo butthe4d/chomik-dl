@@ -51,7 +51,7 @@ done
 
 # Unit sanity: real user, code dir and interpreter, so verify checks the unit itself.
 groupadd --gid 1000 chomik-dl
-useradd --system --uid 1000 --gid 1000 --home-dir /var/lib/chomik-dl --no-create-home \
+useradd --system -K SYS_UID_MAX=1000 --uid 1000 --gid 1000 --home-dir /var/lib/chomik-dl --no-create-home \
   --shell /usr/sbin/nologin chomik-dl
 mkdir -p /var/lib/chomik-dl /opt/chomik-dl/.venv/bin /etc/chomik-dl
 chown chomik-dl:chomik-dl /var/lib/chomik-dl
