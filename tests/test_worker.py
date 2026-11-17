@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 
 import pytest
@@ -96,3 +97,66 @@ async def test_unexpected_exception_marks_failed(env):
     await w.run_once()
     got = store.get(job.id)
     assert got.status == "failed" and got.error_code == "download_failed"
+
+
+async def _run_storage(env, tmp_path, monkeypatch=None, *, require_mount, prep=None):
+    settings, store = env
+    settings = replace(settings, download_require_mount=require_mount)
+    if prep:
+        prep(settings.download_dir)
+    job = make_job(store, "https://chomikuj.pl/u/f,1.zip")
+    session = FakeSession()
+    w = Worker(settings, store, session, download=fake_download, retry_backoff=0)
+    await w.run_once()
+    return store.get(job.id), session
+
+
+async def test_require_mount_plain_dir_fails_before_resolve(env, tmp_path):
+    got, session = await _run_storage(env, tmp_path, require_mount=True, prep=lambda d: d.mkdir())
+    assert got.status == "failed"
+    assert got.error_code == "storage_unavailable"
+    assert got.error_message == MESSAGES["storage_unavailable"]
+    assert session.calls == 0
+
+
+async def test_require_mount_false_plain_dir_ok(env, tmp_path):
+    got, _ = await _run_storage(env, tmp_path, require_mount=False, prep=lambda d: d.mkdir())
+    assert got.status == "done"
+
+
+async def test_require_mount_false_missing_dir_created(env, tmp_path):
+    got, _ = await _run_storage(env, tmp_path, require_mount=False)
+    assert got.status == "done"
+
+
+async def test_missing_dir_fails(env, tmp_path):
+    got, session = await _run_storage(env, tmp_path, require_mount=True)
+    assert got.error_code == "storage_unavailable"
+    assert session.calls == 0
+
+
+async def test_unwritable_dir_fails(env, tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+
+    def prep(d):
+        d.mkdir()
+        d.chmod(0o500)
+
+    try:
+        got, session = await _run_storage(env, tmp_path, require_mount=False, prep=prep)
+    finally:
+        env[0].download_dir.chmod(0o700)
+    assert got.error_code == "storage_unavailable"
+    assert session.calls == 0
+
+
+async def test_require_mount_with_mount_ok(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(os.path, "ismount", lambda p: True)
+    got, _ = await _run_storage(env, tmp_path, require_mount=True, prep=lambda d: d.mkdir())
+    assert got.status == "done"
+
+
+def test_storage_unavailable_not_retryable():
+    from app.worker import RETRYABLE
+    assert "storage_unavailable" not in RETRYABLE

@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import os
+import tempfile
+from pathlib import Path
 
 from app.config import Settings
 from app.downloader import stream_download
@@ -10,6 +13,26 @@ log = logging.getLogger(__name__)
 
 RETRYABLE = {"timeout", "download_failed"}
 MAX_ATTEMPTS = 2
+
+
+def check_download_dir(path: Path, require_mount: bool) -> None:
+    """Raise storage_unavailable unless `path` is a writable directory (and a mount, if required)."""
+    if not path.exists():
+        if require_mount:
+            raise ChomikError("storage_unavailable")
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise ChomikError("storage_unavailable") from None
+    if not path.is_dir():
+        raise ChomikError("storage_unavailable")
+    if require_mount and not os.path.ismount(path):
+        raise ChomikError("storage_unavailable")
+    try:
+        with tempfile.TemporaryFile(dir=path):
+            pass
+    except OSError:
+        raise ChomikError("storage_unavailable") from None
 
 
 class Worker:
@@ -64,6 +87,7 @@ class Worker:
         return True
 
     async def _process(self, job: Job) -> None:
+        check_download_dir(self.settings.download_dir, self.settings.download_require_mount)
         log.info("job %s: resolving %s", job.id, job.url)
         resolved = await self.session.resolve(job.url)
         self.store.update(job.id, status="downloading")
