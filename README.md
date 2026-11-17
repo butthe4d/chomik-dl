@@ -80,8 +80,8 @@ Run this on the Proxmox host. It makes a Debian 13 LXC container and installs ch
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/butthe4d/chomik-dl/main/proxmox/ct/chomik-dl.sh)"
 ```
 
-The container defaults to 1 vCPU, 1.5 GB RAM and a 6 GB disk. It is unprivileged. You can change
-these in the installer's advanced mode.
+The container defaults to 1 vCPU, 1.5 GB RAM and a 6 GB disk. It is unprivileged. The installer's
+own menu lets you change these.
 
 The installer asks for:
 
@@ -137,7 +137,7 @@ settings are put back.
 
 ### Updating
 
-In the container, run `update` (or run the install one-liner again from the host). It makes a backup,
+In the container, run `update`. It makes a backup,
 installs the new version and checks that the app answers. If something fails, it rolls back.
 It does not run without a chomikuj.pl login and password, so set them first.
 
