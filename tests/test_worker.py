@@ -8,6 +8,7 @@ from app.config import Settings
 from app.errors import MESSAGES, ChomikError
 from app.jobs import JobStore
 from tests.conftest import make_job
+from app import worker as worker_mod
 from app.worker import Worker
 
 
@@ -152,7 +153,9 @@ async def test_unwritable_dir_fails(env, tmp_path):
 
 
 async def test_require_mount_with_mount_ok(env, tmp_path, monkeypatch):
-    monkeypatch.setattr(os.path, "ismount", lambda p: True)
+    mi = tmp_path / "mountinfo"
+    mi.write_text(_mi_line(env[0].download_dir.resolve()))
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
     got, _ = await _run_storage(env, tmp_path, require_mount=True, prep=lambda d: d.mkdir())
     assert got.status == "done"
 
@@ -160,3 +163,40 @@ async def test_require_mount_with_mount_ok(env, tmp_path, monkeypatch):
 def test_storage_unavailable_not_retryable():
     from app.worker import RETRYABLE
     assert "storage_unavailable" not in RETRYABLE
+
+
+def _mi_line(mp) -> str:
+    esc = str(mp).replace(" ", "\\040")
+    return f"36 35 98:0 /mnt1 {esc} rw,noatime - ext3 /dev/root rw\n"
+
+
+def test_is_mount_point_listed(tmp_path, monkeypatch):
+    mi = tmp_path / "mi"
+    mi.write_text("1 0 8:1 / / rw - ext4 /dev/sda1 rw\n" + _mi_line(tmp_path.resolve()))
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
+    assert worker_mod.is_mount_point(tmp_path) is True
+
+
+def test_is_mount_point_not_listed(tmp_path, monkeypatch):
+    mi = tmp_path / "mi"
+    mi.write_text("1 0 8:1 / / rw - ext4 /dev/sda1 rw\n")
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
+    assert worker_mod.is_mount_point(tmp_path) is False
+
+
+def test_is_mount_point_octal_space(tmp_path, monkeypatch):
+    d = tmp_path / "my data"
+    d.mkdir()
+    mi = tmp_path / "mi"
+    mi.write_text(_mi_line(d.resolve()))
+    assert "\\040" in mi.read_text()
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
+    assert worker_mod.is_mount_point(d) is True
+
+
+def test_is_mount_point_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", tmp_path / "missing")
+    monkeypatch.setattr(os.path, "ismount", lambda p: True)
+    assert worker_mod.is_mount_point(tmp_path) is True
+    monkeypatch.setattr(os.path, "ismount", lambda p: False)
+    assert worker_mod.is_mount_point(tmp_path) is False
