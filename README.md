@@ -112,13 +112,13 @@ At the end the script prints the page address, the admin link command and the NA
 The app runs as the user `chomik-dl` (UID/GID 1000) in the service `chomik-dl`
 (`systemctl status chomik-dl`, `journalctl -u chomik-dl`).
 
-### Admin link
+### Admin link (Proxmox)
 
 ```bash
 pct exec <CTID> -- cat /root/chomik-dl.creds
 ```
 
-Open the link once, as described in [Admin link](#admin-link). To make a new link, run
+Open the link once, as described in the [Docker section above](#admin-link). To make a new link, run
 `chomik-dl-settings` in the container and choose "Regenerate admin link". The old link stops working.
 
 ### Settings
@@ -165,22 +165,43 @@ paths, addresses and options to your setup.
 
 - NFS: on the server, export the folder with `all_squash,anonuid=101000,anongid=101000`, or give
   101000 ownership of the folder. Example host mount:
-  `192.168.1.5:/volume1/chomik /mnt/nas/chomik nfs defaults 0 0`
+  `192.168.1.5:/volume1/chomik /mnt/nas/chomik nfs _netdev,nofail 0 0`
 - SMB: mount on the host with `uid=101000,gid=101000`. Example:
-  `//192.168.1.5/chomik /mnt/nas/chomik cifs credentials=/root/.smbcred,uid=101000,gid=101000,file_mode=0664,dir_mode=0775 0 0`
+  `//192.168.1.5/chomik /mnt/nas/chomik cifs credentials=/root/.smbcred,uid=101000,gid=101000,file_mode=0664,dir_mode=0775,_netdev,nofail 0 0`
 
 ### Captcha in the container
 
-Log in by hand once on a desktop, as in [Logging in by hand](#logging-in-by-hand-captcha). Then, in the
-container, copy the profile in:
+Log in by hand once on a desktop, as in [Logging in by hand](#logging-in-by-hand-captcha). Then move
+the profile into the container.
 
-```bash
-systemctl stop chomik-dl
-rm -rf /var/lib/chomik-dl/browser
-cp -r browser-profile /var/lib/chomik-dl/browser
-chown -R chomik-dl:chomik-dl /var/lib/chomik-dl/browser
-systemctl start chomik-dl
-```
+1. On the desktop, pack the profile:
+
+   ```bash
+   tar czf browser-profile.tgz -C ./browser-profile .
+   ```
+
+2. Copy it to the Proxmox host and push it into the container:
+
+   ```bash
+   scp browser-profile.tgz root@<proxmox-host>:/root/
+   # on the Proxmox host:
+   pct push <CTID> /root/browser-profile.tgz /root/browser-profile.tgz
+   ```
+
+3. In the container, keep the old profile aside and unpack the new one:
+
+   ```bash
+   systemctl stop chomik-dl
+   mv /var/lib/chomik-dl/browser /var/lib/chomik-dl/browser.old
+   mkdir /var/lib/chomik-dl/browser
+   tar xzf /root/browser-profile.tgz -C /var/lib/chomik-dl/browser
+   chown -R chomik-dl:chomik-dl /var/lib/chomik-dl/browser
+   systemctl start chomik-dl
+   ```
+
+4. Request a download and check that it logs in. If it works, delete the old profile:
+   `rm -rf /var/lib/chomik-dl/browser.old`. If not, stop the service, remove the new
+   `/var/lib/chomik-dl/browser`, move `browser.old` back to `browser`, and start the service.
 
 ## Staying under the radar
 
