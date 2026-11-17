@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# chomik-dl-settings: view and change chomik-dl settings inside the container.
+#
+#   chomik-dl-settings                 menu (whiptail, or plain prompts)
+#   chomik-dl-settings --get KEY       print one setting
+#   chomik-dl-settings --set KEY VALUE validate, save, restart; restores the
+#                                      previous settings if the app fails to start
+#   chomik-dl-settings --set KEY -     same, value read from stdin (for secrets)
+#   chomik-dl-settings --set K1 V1 K2 V2 ...
+#                                      several settings, one restart
+#   chomik-dl-settings --list          print all setting names
+set -uo pipefail
+
+lib="${CHOMIKDL_LIB:-/usr/local/lib/chomik-dl/chomik-dl-lib.sh}"
+[[ -r "$lib" ]] || lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/chomik-dl-lib.sh"
+# shellcheck source-path=SCRIPTDIR source=chomik-dl-lib.sh
+. "$lib"
+
+usage() {
+  cat <<EOF
+Usage: chomik-dl-settings                  open the settings menu
+       chomik-dl-settings --get KEY        print the value of KEY
+       chomik-dl-settings --set KEY VALUE  change KEY, restart chomik-dl
+       chomik-dl-settings --set KEY -      same, reading the value from stdin
+                                           (use this for the password, so it
+                                           doesn't appear in the process list
+                                           or shell history), e.g.
+                                           read -rs p; printf '%s' "\$p" | chomik-dl-settings --set CHOMIKUJ_PASSWORD -
+       chomik-dl-settings --set K1 V1 K2 V2 ...
+                                           change several settings with one
+                                           restart (at most one value may be -)
+       chomik-dl-settings --list           list setting names
+
+Settings live in $CHOMIKDL_ENV. The menu can also regenerate the
+admin link (the old link stops working); the current link is in
+$CD_CREDS_FILE.
+EOF
+}
+
+need_root() {
+  if [[ $EUID -ne 0 ]]; then
+    cd_err "Run chomik-dl-settings as root."
+    exit 1
+  fi
+}
+
+# Copy of the settings file to edit; applied with cd_apply_settings.
+WORK=""
+WORK_BASE=""
+make_work_copy() {
+  WORK="$(mktemp "$(dirname "$CHOMIKDL_ENV")/.chomik-dl.env.edit.XXXXXX")" || exit 1
+  trap 'rm -f "$WORK"' EXIT
+  cp -p "$CHOMIKDL_ENV" "$WORK" || exit 1
+  WORK_BASE="$(sha256sum <"$CHOMIKDL_ENV")"
+}
+
+# Under the lock: refuse if someone else changed the file since the copy.
+apply_work_copy() {
+  if [[ "$(sha256sum <"$CHOMIKDL_ENV")" != "$WORK_BASE" ]]; then
+    cd_err "The settings were changed by someone else meanwhile; nothing saved. Run chomik-dl-settings again."
+    return 1
+  fi
+  cd_apply_settings "$WORK"
+}
+
+set_locked() { # KEY VALUE [KEY VALUE ...]
+  make_work_copy
+  while (($# >= 2)); do
+    CHOMIKDL_ENV="$WORK" _cd_settings_write "$1" "$2" || exit 1
+    shift 2
+  done
+  # Checked on the result, so the order of the pairs doesn't matter.
+  local k v
+  for k in HUMAN_PAUSE_MIN HUMAN_PAUSE_MAX; do
+    v="$(CHOMIKDL_ENV="$WORK" cd_settings_get "$k")" || continue
+    CHOMIKDL_ENV="$WORK" cd_validate "$k" "$v" || exit 1
+  done
+  cd_apply_settings "$WORK" || exit 1
+}
+
+# The admin link carries PUBLIC_URL: rewrite the creds file (same token).
+refresh_creds() {
+  cd_write_creds || cd_err "Warning: could not update $CD_CREDS_FILE; run: chomik-dl-settings and regenerate the admin link."
+}
+
+cmd_set() { # KEY VALUE [KEY VALUE ...]: validate all, then one save + restart
+  local -a pairs=() keys=()
+  local key value stdin_used=0 url_changed=0
+  need_root
+  while (($# >= 2)); do
+    key="$1" value="$2"
+    shift 2
+    if [[ "$value" == - ]]; then
+      if [[ $stdin_used == 1 ]]; then
+        cd_err "Only one value can be read from stdin (-)."
+        exit 2
+      fi
+      stdin_used=1
+      value="$(cat)"
+    fi
+    # The pauses are checked against each other once all pairs are in.
+    CHOMIKDL_ENV=/dev/null cd_validate "$key" "$value" || exit 1
+    [[ "$key" == PUBLIC_URL ]] && url_changed=1
+    pairs+=("$key" "$value")
+    keys+=("$key")
+  done
+  cd_with_lock set_locked "${pairs[@]}" || exit 1
+  [[ $url_changed == 1 ]] && refresh_creds
+  local list="${keys[*]}"
+  echo "Saved ${list// /, }; chomik-dl restarted."
+}
+
+# --- menu --------------------------------------------------------------------
+
+is_secret() { [[ "$1" == CHOMIKUJ_PASSWORD ]]; }
+
+shown() { # key -> display value from the working copy
+  local v
+  v="$(CHOMIKDL_ENV="$WORK" cd_settings_get "$1")" || v=""
+  if [[ -z "$v" ]]; then
+    printf '(not set)'
+  elif is_secret "$1"; then
+    printf '********'
+  elif ((${#v} > 44)); then
+    printf '%s...' "${v:0:41}"
+  else
+    printf '%s' "$v"
+  fi
+}
+
+# Prints the chosen tag: a key, ADMIN_LINK, SAVE or QUIT.
+choose() {
+  local changed="$1" k choice i
+  if cd_use_whiptail; then
+    local -a items=()
+    for k in "${CD_USER_KEYS[@]}"; do items+=("$k" "$(shown "$k")"); done
+    items+=(ADMIN_LINK "Regenerate admin link (the old one stops working)")
+    items+=(SAVE "Save and restart chomik-dl${changed:+ (unsaved changes)}")
+    items+=(QUIT "Exit without saving")
+    # Cancel, Esc or no choice within the field timeout: quit without saving.
+    cd_whiptail "$(cd_field_timeout)" --menu "Choose a setting to change:" 22 78 12 "${items[@]}" || echo QUIT
+    return 0
+  fi
+  {
+    echo
+    echo "chomik-dl settings${changed:+ (unsaved changes)}:"
+    i=0
+    for k in "${CD_USER_KEYS[@]}"; do
+      i=$((i + 1))
+      printf '  %2d) %-20s %s\n' "$i" "$k" "$(shown "$k")"
+    done
+    echo "      admin                regenerate the admin link"
+    echo "      save                 save and restart chomik-dl"
+    echo "      quit                 exit without saving"
+    printf 'Choice (number or name): '
+  } >&2
+  cd_read_line choice "" "$(cd_field_timeout)" || { echo QUIT; return 0; }
+  choice="${choice//[[:space:]]/}"
+  case "${choice,,}" in
+  save) echo SAVE ;;
+  quit | q | "") echo QUIT ;;
+  admin | admin_link) echo ADMIN_LINK ;;
+  *)
+    if [[ "$choice" =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= ${#CD_USER_KEYS[@]})); then
+      echo "${CD_USER_KEYS[choice - 1]}"
+    else
+      echo "${choice^^}"
+    fi
+    ;;
+  esac
+}
+
+cmd_menu() {
+  need_root
+  if ! cd_can_prompt; then
+    cd_err "No terminal to show the menu on; use --get/--set (see --help)."
+    exit 1
+  fi
+  cd_open_answers || exit 1
+  make_work_copy
+  local changed="" tag cur new secret="" url_before
+  url_before="$(cd_settings_get PUBLIC_URL)" || url_before=""
+  while :; do
+    tag="$(choose "$changed")"
+    case "$tag" in
+    QUIT)
+      [[ -n "$changed" ]] && echo "Changes discarded." >&2
+      exit 0
+      ;;
+    SAVE)
+      if [[ -z "$changed" ]]; then
+        echo "Nothing changed." >&2
+        exit 0
+      fi
+      local err
+      if err="$(cd_with_lock apply_work_copy 2>&1)"; then
+        if [[ "$(cd_settings_get PUBLIC_URL)" != "$url_before" ]]; then
+          refresh_creds
+        fi
+        cd_show_message "Saved. chomik-dl restarted."
+        exit 0
+      fi
+      cd_show_message "$err"
+      exit 1
+      ;;
+    ADMIN_LINK)
+      if cd_ask_yesno "Regenerate the admin link?
+
+The current link stops working at once. The new one is saved in $CD_CREDS_FILE." n; then
+        if cd_regenerate_admin; then
+          cd_show_message "New admin link saved. Show it with: cat $CD_CREDS_FILE"
+        else
+          cd_show_message "Regenerating the admin link failed."
+        fi
+      fi
+      ;;
+    *)
+      local known=0 k
+      for k in "${CD_USER_KEYS[@]}"; do [[ "$k" == "$tag" ]] && known=1; done
+      if [[ $known == 0 ]]; then
+        cd_err "Unknown choice: $tag"
+        continue
+      fi
+      cur="$(CHOMIKDL_ENV="$WORK" cd_settings_get "$tag")" || cur=""
+      secret=""
+      is_secret "$tag" && secret=secret
+      if new="$(CHOMIKDL_ENV="$WORK" cd_ask_setting "$tag" "$(cd_prompt_for "$tag")" "$cur" "$secret")"; then
+        if [[ "$new" != "$cur" ]]; then
+          CHOMIKDL_ENV="$WORK" cd_settings_set "$tag" "$new" && changed=1
+        fi
+      fi
+      ;;
+    esac
+  done
+}
+
+case "${1:-}" in
+"") cmd_menu ;;
+--get)
+  [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+  cd_is_key "$2" || { cd_err "Unknown setting: $2"; exit 1; }
+  v="$(cd_settings_get "$2")" || exit 1
+  printf '%s\n' "$v"
+  ;;
+--set)
+  [[ $# -ge 3 && $(($# % 2)) -eq 1 ]] || { usage >&2; exit 2; }
+  shift
+  cmd_set "$@"
+  ;;
+--list) printf '%s\n' "${CD_KEYS[@]}" ;;
+-h | --help) usage ;;
+*) usage >&2; exit 2 ;;
+esac
