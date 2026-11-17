@@ -547,6 +547,7 @@ Now: at least ${v[MIN_JOB_GAP_SECONDS]} s between downloads, ${v[HUMAN_PAUSE_MIN
         v[MIN_JOB_GAP_SECONDS]="$(cd_ask_setting MIN_JOB_GAP_SECONDS "$(cd_prompt_for MIN_JOB_GAP_SECONDS)" \
           "${v[MIN_JOB_GAP_SECONDS]}")" || true
         # Checked against each other below, not against the settings file.
+        local pmin="${v[HUMAN_PAUSE_MIN]}" pmax="${v[HUMAN_PAUSE_MAX]}"
         while :; do
           for k in HUMAN_PAUSE_MIN HUMAN_PAUSE_MAX; do
             v[$k]="$(CHOMIKDL_ENV=/dev/null cd_ask_setting "$k" "$(cd_prompt_for "$k")" "${v[$k]}")" || break 2
@@ -554,6 +555,15 @@ Now: at least ${v[MIN_JOB_GAP_SECONDS]} s between downloads, ${v[HUMAN_PAUSE_MIN
           _cd_le "${v[HUMAN_PAUSE_MIN]}" "${v[HUMAN_PAUSE_MAX]}" && break
           cd_show_message "HUMAN_PAUSE_MIN must not be greater than HUMAN_PAUSE_MAX; enter both again."
         done
+        # Cancel, Esc, end of input or timeout halfway: keep the previous
+        # pair (or the defaults), never a mismatched one.
+        if ! _cd_le "${v[HUMAN_PAUSE_MIN]}" "${v[HUMAN_PAUSE_MAX]}"; then
+          if _cd_is_number "$pmin" && _cd_is_number "$pmax" && _cd_le "$pmin" "$pmax"; then
+            v[HUMAN_PAUSE_MIN]="$pmin" v[HUMAN_PAUSE_MAX]="$pmax"
+          else
+            v[HUMAN_PAUSE_MIN]=1.0 v[HUMAN_PAUSE_MAX]=4.0
+          fi
+        fi
       fi
       v[CHOMIKDL_CHANNEL]="$(cd_ask_setting CHOMIKDL_CHANNEL "$(cd_prompt_for CHOMIKDL_CHANNEL)" \
         "${v[CHOMIKDL_CHANNEL]}")" || true
@@ -760,8 +770,13 @@ cd_build_ref() {
     # Chained with &&: `set -e` would be ignored here (this runs on the left
     # of ||), so a failed step would not stop the build.
     (
+      # PLAYWRIGHT_SKIP_BROWSER_GC: every build runs from TARGET.new, so the
+      # live version's .links entry looks stale to Playwright, which would
+      # delete the Chromium the running app (and a rollback) still needs.
+      # cd_prune_browsers cleans up once the new version is known good.
       export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_INPUT=1 PIP_NO_CACHE_DIR=1 \
-        DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH="$CD_BROWSERS_DIR"
+        DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH="$CD_BROWSERS_DIR" \
+        PLAYWRIGHT_SKIP_BROWSER_GC=1
       python3 -m venv "$stage/.venv" &&
         "$stage/.venv/bin/python" -m pip install -q "$stage" &&
         "$stage/.venv/bin/python" -m playwright install --with-deps chromium &&
@@ -779,6 +794,23 @@ cd_build_ref() {
     rm -rf "$stage"
     return 1
   fi
+}
+
+# cd_prune_browsers: remove the Chromium builds in CD_BROWSERS_DIR that the
+# installed version does not use. Run it only once that version is known
+# good (after its health check): a rollback needs the previous one's browser.
+# Playwright's own cleanup does this on `install` (it drops .links entries
+# whose venv is gone, then every browser no entry refers to); the browser
+# itself is already there, so nothing is downloaded. Failure only warns.
+cd_prune_browsers() {
+  local log
+  log="$(mktemp)" || return 0
+  if ! (cd / && env -u PLAYWRIGHT_SKIP_BROWSER_GC PLAYWRIGHT_BROWSERS_PATH="$CD_BROWSERS_DIR" \
+    "$CD_APP_DIR/.venv/bin/python" -m playwright install chromium) >"$log" 2>&1; then
+    cd_err "Warning: could not remove unused browsers from $CD_BROWSERS_DIR:"
+    tail -n 5 "$log" >&2
+  fi
+  rm -f "$log"
 }
 
 # Move TARGET to TARGET.prev and STAGE to TARGET; on failure put TARGET back.
@@ -1074,6 +1106,7 @@ _cd_update() {
   echo "Starting the new version..."
   if cd_service start && cd_health; then
     _cd_untrap
+    cd_prune_browsers
     _cd_refresh_helpers
     # The engine pin only moves forward with main: a release's lib may carry
     # an older pin than the one /usr/bin/update already has.

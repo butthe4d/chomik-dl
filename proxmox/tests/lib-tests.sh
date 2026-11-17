@@ -140,6 +140,20 @@ eq "answered: gap" "30" "$(cd_settings_get MIN_JOB_GAP_SECONDS)"
 eq "answered: pauses asked again after MIN > MAX" "0.5 2" "$(cd_settings_get HUMAN_PAUSE_MIN) $(cd_settings_get HUMAN_PAUSE_MAX)"
 eq "answered: channel" "releases" "$(cd_settings_get CHOMIKDL_CHANNEL)"
 
+# Input ends after MIN 5 (like Cancel/timeout on the MAX question): the
+# install must go on with a consistent pair, never fail.
+: >"$CHOMIKDL_ENV"
+printf '%s\n' me "$pw" http://dl.lan:8080 "" y 30 5 >"$T/answers"
+CHOMIKDL_ANSWERS="$T/answers" collect >/dev/null 2>&1
+eq "cancelled MAX question: collect exits 0" 0 "$?"
+eq "cancelled MAX question: default pair kept" "1.0 4.0" "$(cd_settings_get HUMAN_PAUSE_MIN) $(cd_settings_get HUMAN_PAUSE_MAX)"
+eq "cancelled MAX question: other answers saved" "me 30" "$(cd_settings_get CHOMIKUJ_LOGIN) $(cd_settings_get MIN_JOB_GAP_SECONDS)"
+cd_settings_set HUMAN_PAUSE_MIN 0.5 && cd_settings_set HUMAN_PAUSE_MAX 2
+printf '%s\n' "" "" "" "" y "" 9 >"$T/answers"
+CHOMIKDL_ANSWERS="$T/answers" collect >/dev/null 2>&1
+eq "cancelled MAX question on a re-run: exits 0" 0 "$?"
+eq "cancelled MAX question on a re-run: previous pair kept" "0.5 2" "$(cd_settings_get HUMAN_PAUSE_MIN) $(cd_settings_get HUMAN_PAUSE_MAX)"
+
 # --- releases channel without releases or tags --------------------------------
 if command -v python3 >/dev/null; then
   # No releases/latest file: the fake API answers 404 like GitHub does.
