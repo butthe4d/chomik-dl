@@ -16,9 +16,9 @@ WorkingDirectory=/opt/chomik-dl
 EnvironmentFile=/etc/chomik-dl/chomik-dl.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/chomik-dl-browsers
-# The venv is built in /opt/chomik-dl.new and moved into place; the install
-# rewrites the console scripts' #! lines to the final path.
-ExecStart=/opt/chomik-dl/.venv/bin/uvicorn --factory app.main:build --host 0.0.0.0 --port 8080
+# `python -m`: the venv is built in /opt/chomik-dl.new and moved into place, so
+# its console scripts carry a stale #! line; the interpreter itself is fine.
+ExecStart=/opt/chomik-dl/.venv/bin/python -m uvicorn --factory app.main:build --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=5
 # No namespace sandboxing (PrivateTmp=, ProtectSystem=...): it can fail with

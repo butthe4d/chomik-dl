@@ -726,7 +726,9 @@ cd_install_ref() {
 # into TARGET_DIR.new; build a venv there with the app and install the
 # matching Playwright Chromium (and its system packages) into
 # CD_BROWSERS_DIR. The live TARGET_DIR is not touched, so this can run while
-# the app is up.
+# the app is up. Run the venv only as `.venv/bin/python -m ...`: its console
+# scripts keep the .new path in their #! line, while bin/python is a symlink
+# to the system interpreter and works from the moved venv.
 cd_build_ref() {
   local ref="$1" target="${2%/}" stage log url rc=0
   if [[ ! "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ || "$ref" == *..* ]]; then
@@ -762,9 +764,8 @@ cd_build_ref() {
         DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH="$CD_BROWSERS_DIR"
       python3 -m venv "$stage/.venv" &&
         "$stage/.venv/bin/python" -m pip install -q "$stage" &&
-        "$stage/.venv/bin/playwright" install --with-deps chromium &&
-        "$stage/.venv/bin/python" -c "import app.main" &&
-        _cd_fix_shebangs "$stage" "$target"
+        "$stage/.venv/bin/python" -m playwright install --with-deps chromium &&
+        "$stage/.venv/bin/python" -c "import app.main"
     ) >>"$log" 2>&1 || rc=1
   fi
   if [[ $rc != 0 ]]; then
@@ -778,20 +779,6 @@ cd_build_ref() {
     rm -rf "$stage"
     return 1
   fi
-}
-
-# _cd_fix_shebangs STAGE TARGET: the venv's console scripts (uvicorn, which
-# the unit runs, and playwright) name STAGE's interpreter in their #! line;
-# point them at TARGET's, where the venv will live after the swap.
-_cd_fix_shebangs() {
-  local stage="$1" target="$2" f first
-  for f in "$stage"/.venv/bin/*; do
-    [[ -f "$f" && ! -L "$f" ]] || continue
-    IFS= read -r first <"$f" || continue
-    if [[ "$first" == "#!$stage/.venv/bin/"* ]]; then
-      sed -i "1s|^#!$stage/|#!$target/|" "$f" || return 1
-    fi
-  done
 }
 
 # Move TARGET to TARGET.prev and STAGE to TARGET; on failure put TARGET back.
