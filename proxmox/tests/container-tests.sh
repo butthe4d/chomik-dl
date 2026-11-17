@@ -105,8 +105,9 @@ eq "the app started Chromium from /opt/chomik-dl-browsers" 1 "$chromium_up"
 
 eq "login from CHOMIKDL_LOGIN" tester "$(cd_settings_get CHOMIKUJ_LOGIN)"
 eq "password stored byte for byte" "$PW" "$(cd_settings_get CHOMIKUJ_PASSWORD)"
+# Read as the app's own user: docker drops CAP_SYS_PTRACE, so root may not.
 eq "the service got the password byte for byte" "$PW" \
-  "$(tr '\0' '\n' <"/proc/$(app_pid)/environ" | sed -n 's/^CHOMIKUJ_PASSWORD=//p')"
+  "$(cd_as_app_user cat "/proc/$(app_pid)/environ" | tr '\0' '\n' | sed -n 's/^CHOMIKUJ_PASSWORD=//p')"
 eq "DOWNLOAD_REQUIRE_MOUNT" true "$(cd_settings_get DOWNLOAD_REQUIRE_MOUNT)"
 eq "DOWNLOAD_DIR" /data "$(cd_settings_get DOWNLOAD_DIR)"
 eq "DATA_DIR" "$DATA" "$(cd_settings_get DATA_DIR)"
