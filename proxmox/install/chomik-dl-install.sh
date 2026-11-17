@@ -122,8 +122,8 @@ customize
 cd_write_update_entrypoint || msg_warn "Could not write /usr/bin/update; run updates with: bash -c \"\$(curl -fsSL ${CHOMIKDL_SCRIPTS_URL}/ct/chomik-dl.sh)\""
 cleanup_lxc
 
-echo -e "${INFO:-}${YW:-} chomik-dl is running on $(cd_settings_get PUBLIC_URL)${CL:-}"
 if [[ $have_credentials == 1 ]]; then
+  echo -e "${INFO:-}${YW:-} chomik-dl is running on $(cd_settings_get PUBLIC_URL)${CL:-}"
   if [[ -t 1 && "${_CS_HANGUP:-0}" != 1 ]] && admin_link="$(sed -n 's/^Admin link: //p' "$CD_CREDS_FILE" 2>/dev/null | head -n 1)" && [[ -n "$admin_link" ]]; then
     # Only onto a live terminal: after a console hangup the engine sends this
     # output to its install log, and the link is a login.
