@@ -1,0 +1,29 @@
+[Unit]
+Description=chomik-dl (chomikuj.pl download queue)
+Documentation=https://github.com/butthe4d/chomik-dl
+After=network-online.target
+Wants=network-online.target
+# A broken configuration stops after 5 failed starts in 2 minutes instead of
+# restarting forever.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=chomik-dl
+Group=chomik-dl
+WorkingDirectory=/opt/chomik-dl
+EnvironmentFile=/etc/chomik-dl/chomik-dl.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/chomik-dl-browsers
+# `python -m`: the venv is built in /opt/chomik-dl.new and moved into place, so
+# its console scripts carry a stale #! line; the interpreter itself is fine.
+ExecStart=/opt/chomik-dl/.venv/bin/python -m uvicorn --factory app.main:build --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+# No namespace sandboxing (PrivateTmp=, ProtectSystem=...): it can fail with
+# 226/NAMESPACE in unprivileged LXC containers.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

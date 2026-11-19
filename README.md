@@ -3,6 +3,8 @@
 A small background downloader for chomikuj.pl, meant for a homelab. Family members ask for a file,
 and one admin approves it. Nothing downloads until the admin says yes.
 
+Running on Proxmox? See [Proxmox (community-script style)](#proxmox-community-script-style).
+
 ## How it works
 
 1. A family member opens the page, pastes a link to a file page (for example
@@ -70,6 +72,139 @@ can't queue requests or approve them behind your back.
 
 Logs: `docker compose logs -f`.
 
+## Proxmox (community-script style)
+
+Run this on the Proxmox host. It makes a Debian 13 LXC container and installs chomik-dl in it:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/butthe4d/chomik-dl/main/proxmox/ct/chomik-dl.sh)"
+```
+
+The container defaults to 1 vCPU, 1.5 GB RAM and a 6 GB disk. It is unprivileged. The installer's
+own menu lets you change these.
+
+The installer asks for:
+
+- your chomikuj.pl login and password (the password is not shown),
+- `PUBLIC_URL`, the address you open chomik-dl at (default `http://<container-IP>:8080`),
+- `ALLOWED_HOSTS`, extra host names the page may be opened by (optional),
+- optionally, the minimum gap between downloads and the two pauses between browser actions (these questions only appear after you answer yes to "Change the download pacing (advanced)?"),
+- the update channel: `main` (every commit, the default) or `releases` (tagged releases).
+
+For an unattended install, set `CHOMIKDL_LOGIN` and `CHOMIKDL_PASSWORD` in the environment.
+If you give no login and password, chomik-dl is installed but left stopped. Run
+`chomik-dl-settings` in the container to enter them. It then starts the service.
+If nobody answers the login question within the timeout, the remaining questions are skipped.
+The service is installed but left stopped until `chomik-dl-settings` sets the login.
+
+At the end the script prints the page address, the admin link command and the NAS hint below.
+
+### Where things live
+
+| What | Where |
+|---|---|
+| Code | `/opt/chomik-dl` |
+| Chromium | `/opt/chomik-dl-browsers` |
+| Settings | `/etc/chomik-dl/chomik-dl.env` |
+| Database, admin token, browser profile | `/var/lib/chomik-dl` |
+| Downloads | `/data` |
+| Admin link | `/root/chomik-dl.creds` |
+| Update backups | `/var/backups/chomik-dl/` (the last 3 are kept) |
+
+The app runs as the user `chomik-dl` (UID/GID 1000) in the service `chomik-dl`
+(`systemctl status chomik-dl`, `journalctl -u chomik-dl`).
+
+### Admin link (Proxmox)
+
+```bash
+pct exec <CTID> -- cat /root/chomik-dl.creds
+```
+
+Open the link once, as described in the [Docker section above](#admin-link). To make a new link, run
+`chomik-dl-settings` in the container and choose "Regenerate admin link". The old link stops working.
+
+### Settings
+
+Run `chomik-dl-settings` in the container for a menu. You can also use it in scripts:
+
+```bash
+chomik-dl-settings --list                       # setting names
+chomik-dl-settings --get PUBLIC_URL
+chomik-dl-settings --set MIN_JOB_GAP_SECONDS 30
+read -rs p; printf '%s' "$p" | chomik-dl-settings --set CHOMIKUJ_PASSWORD -
+```
+
+A change is checked, saved, and chomik-dl is restarted. If the app does not start, the previous
+settings are put back.
+
+### Updating
+
+In the container, run `update`. It makes a backup,
+installs the new version and checks that the app answers. If something fails, it rolls back.
+It does not run without a chomikuj.pl login and password, so set them first.
+
+The channel is the `CHOMIKDL_CHANNEL` setting. With `releases` and no GitHub release yet, it prints
+"No release yet; staying on <current>." and changes nothing.
+
+### Attaching the NAS folder
+
+The installer makes a plain `/data` folder if there is none. Until `/data` is a real, writable mount
+point, downloads are refused with "Download folder is not available — is the NAS mounted?".
+Requests and approvals still work meanwhile. After you mount the share, press **Ponów** on the admin
+page to retry.
+
+1. Mount the share on the Proxmox host (as Proxmox storage or in `/etc/fstab`).
+2. Give it to the container:
+
+   ```bash
+   pct set <CTID> -mp0 /mnt/nas/chomik,mp=/data
+   pct reboot <CTID>
+   ```
+
+The app writes as UID/GID 1000 in the container. In an unprivileged container that is
+**101000** on the host, so the share must be writable by that ID. These are examples; adapt the
+paths, addresses and options to your setup.
+
+- NFS: on the server, export the folder with `all_squash,anonuid=101000,anongid=101000`, or give
+  101000 ownership of the folder. Example host mount:
+  `192.168.1.5:/volume1/chomik /mnt/nas/chomik nfs _netdev,nofail 0 0`
+- SMB: mount on the host with `uid=101000,gid=101000`. Example:
+  `//192.168.1.5/chomik /mnt/nas/chomik cifs credentials=/root/.smbcred,uid=101000,gid=101000,file_mode=0664,dir_mode=0775,_netdev,nofail 0 0`
+
+### Captcha in the container
+
+Log in by hand once on a desktop, as in [Logging in by hand](#logging-in-by-hand-captcha). Then move
+the profile into the container.
+
+1. On the desktop, pack the profile:
+
+   ```bash
+   tar czf browser-profile.tgz -C ./browser-profile .
+   ```
+
+2. Copy it to the Proxmox host and push it into the container:
+
+   ```bash
+   scp browser-profile.tgz root@<proxmox-host>:/root/
+   # on the Proxmox host:
+   pct push <CTID> /root/browser-profile.tgz /root/browser-profile.tgz
+   ```
+
+3. In the container, keep the old profile aside and unpack the new one:
+
+   ```bash
+   systemctl stop chomik-dl
+   mv /var/lib/chomik-dl/browser /var/lib/chomik-dl/browser.old
+   mkdir /var/lib/chomik-dl/browser
+   tar xzf /root/browser-profile.tgz -C /var/lib/chomik-dl/browser
+   chown -R chomik-dl:chomik-dl /var/lib/chomik-dl/browser
+   systemctl start chomik-dl
+   ```
+
+4. Request a download and check that it logs in. If it works, delete the old profile:
+   `rm -rf /var/lib/chomik-dl/browser.old`. If not, stop the service, remove the new
+   `/var/lib/chomik-dl/browser`, move `browser.old` back to `browser`, and start the service.
+
 ## Staying under the radar
 
 The browser presents itself as an ordinary Chromium on Linux: no "HeadlessChrome" anywhere,
@@ -100,7 +235,7 @@ Keep the volume low.
 | File not found or removed | Check the link in a normal browser. |
 | chomikuj did not respond in time / Download interrupted | The job was already retried once, so submit it again later. |
 
-Every failure saves a screenshot of what the browser saw to `./data/last_error.png`.
+Every failure saves a screenshot of what the browser saw to `./data/last_error.png` (Docker) or `/var/lib/chomik-dl/last_error.png` (Proxmox).
 
 ### Logging in by hand (captcha)
 

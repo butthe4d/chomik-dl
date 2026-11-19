@@ -9,6 +9,7 @@ MESSAGES: dict[str, str] = {
     "not_found": "File not found or removed",
     "timeout": "chomikuj did not respond in time",
     "download_failed": "Download interrupted",
+    "storage_unavailable": "Download folder is not available — is the NAS mounted?",
 }
 
 

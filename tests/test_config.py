@@ -48,3 +48,10 @@ def test_public_url():
     assert load_settings(base).public_url is None
     assert load_settings({**base, "PUBLIC_URL": "http://h:8080/"}).public_url == "http://h:8080"
     assert load_settings({**base, "PUBLIC_URL": ""}).public_url is None
+
+
+def test_download_require_mount():
+    base = {"CHOMIKUJ_LOGIN": "u", "CHOMIKUJ_PASSWORD": "p"}
+    assert load_settings(base).download_require_mount is False
+    assert load_settings({**base, "DOWNLOAD_REQUIRE_MOUNT": "true"}).download_require_mount is True
+    assert load_settings({**base, "DOWNLOAD_REQUIRE_MOUNT": "false"}).download_require_mount is False

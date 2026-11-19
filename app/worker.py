@@ -1,5 +1,9 @@
 import asyncio
 import logging
+import os
+import re
+import tempfile
+from pathlib import Path
 
 from app.config import Settings
 from app.downloader import stream_download
@@ -10,6 +14,46 @@ log = logging.getLogger(__name__)
 
 RETRYABLE = {"timeout", "download_failed"}
 MAX_ATTEMPTS = 2
+MOUNTINFO = Path("/proc/self/mountinfo")
+
+
+def _unescape(field: str) -> str:
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def is_mount_point(path: Path) -> bool:
+    """True if `path` is a mount point; unlike os.path.ismount this also detects same-device bind mounts."""
+    try:
+        text = MOUNTINFO.read_text()
+    except OSError:
+        return os.path.ismount(path)
+    target = str(path.resolve())
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) > 4 and _unescape(parts[4]) == target:
+            return True
+    return False
+
+
+def check_download_dir(path: Path, require_mount: bool) -> None:
+    """Raise storage_unavailable unless `path` is a writable directory (and a mount, if required)."""
+    if not path.exists():
+        if require_mount:
+            raise ChomikError("storage_unavailable")
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise ChomikError("storage_unavailable") from None
+    if not path.is_dir():
+        raise ChomikError("storage_unavailable")
+    if require_mount and not is_mount_point(path):
+        raise ChomikError("storage_unavailable")
+    try:
+        with tempfile.NamedTemporaryFile(dir=path) as f:
+            f.write(b"0")
+            f.flush()
+    except OSError:
+        raise ChomikError("storage_unavailable") from None
 
 
 class Worker:
@@ -64,6 +108,7 @@ class Worker:
         return True
 
     async def _process(self, job: Job) -> None:
+        check_download_dir(self.settings.download_dir, self.settings.download_require_mount)
         log.info("job %s: resolving %s", job.id, job.url)
         resolved = await self.session.resolve(job.url)
         self.store.update(job.id, status="downloading")

@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Minimal systemctl stand-in for the test container (no systemd as PID 1).
+# Understands the subset of unit syntax chomik-dl.service uses: User=, Group=,
+# WorkingDirectory=, Environment=, EnvironmentFile=, ExecStartPre=, ExecStart=,
+# and models
+# the start rate limit (StartLimitIntervalSec=, StartLimitBurst=): like
+# systemd, every start (manual restarts included) counts, a start beyond the
+# burst within the interval is refused (start-limit-hit) until reset-failed.
+# stop also kills whatever the unit's User still runs afterwards (Chromium
+# starts in its own process group), as systemd's cgroup would.
+# The EnvironmentFile is loaded by bash (`set -a; .`), which reads the
+# settings file's quoting the same way systemd does (checked separately
+# against real systemd by run-container-tests.sh).
+set -uo pipefail
+
+STATE=/run/stub-systemd
+LOGS=/var/log/stub-systemd
+mkdir -p "$STATE" "$LOGS"
+
+unit_path() { echo "/etc/systemd/system/${1%.service}.service"; }
+pidfile() { echo "$STATE/${1%.service}.pid"; }
+logfile() { echo "$LOGS/${1%.service}.log"; }
+
+unit_values() { # unit key -> one value per line
+  sed -n "s/^$2=//p" "$(unit_path "$1")"
+}
+
+# Running and not a zombie (PID 1 of a test container may not reap).
+alive() {
+  local st
+  kill -0 "$1" 2>/dev/null || return 1
+  st="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
+  st="${st##*) }" # the state follows the (command name), which may hold spaces
+  [[ "${st%% *}" != Z ]]
+}
+
+is_active() {
+  local pf
+  pf="$(pidfile "$1")"
+  [[ -f "$pf" ]] && alive "$(cat "$pf")"
+}
+
+# Run one Exec line as the unit's user with the unit's environment
+# (replacing this shell when the third argument is "exec").
+run_exec() { # unit line [exec]
+  local unit="$1" line="$2" user group wd envfile optional=0
+  user="$(unit_values "$unit" User | tail -1)"
+  group="$(unit_values "$unit" Group | tail -1)"
+  wd="$(unit_values "$unit" WorkingDirectory | tail -1)"
+  envfile="$(unit_values "$unit" EnvironmentFile | tail -1)"
+  if [[ "$envfile" == -* ]]; then optional=1 envfile="${envfile#-}"; fi
+  local -a args envs=()
+  mapfile -d '' args < <(printf '%s' "$line" | xargs printf '%s\0')
+  # Environment= first; the EnvironmentFile overrides it, as in systemd.
+  local e
+  while IFS= read -r e; do
+    [[ -n "$e" ]] && mapfile -d '' -O "${#envs[@]}" envs < <(printf '%s' "$e" | xargs printf '%s\0')
+  done < <(unit_values "$unit" Environment)
+  local home=/root
+  [[ -n "$user" ]] && home="$(getent passwd "$user" | cut -d: -f6)"
+  local -a drop=()
+  [[ -n "$user" ]] && drop=(setpriv "--reuid=$user" "--regid=${group:-$user}" --init-groups)
+  local -a ex=()
+  [[ "${3:-}" == exec ]] && ex=(exec)
+  # shellcheck disable=SC2016
+  "${ex[@]}" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin LANG=C.UTF-8 \
+    HOME="$home" USER="${user:-root}" LOGNAME="${user:-root}" "${envs[@]}" \
+    bash -c 'if [[ -f "$1" ]]; then set -a; . "$1"; set +a; elif [[ "$2" == 0 && -n "$1" ]]; then echo "Failed to load environment file $1" >&2; exit 1; fi
+             cd "${3:-/}" || exit 1; shift 3; exec "$@"' \
+    _ "$envfile" "$optional" "$wd" "${drop[@]}" "${args[@]}"
+}
+
+startsfile() { echo "$STATE/${1%.service}.starts"; }
+
+# Count this start against the unit's rate limit; fail if it is exhausted.
+start_limit_ok() {
+  local unit="$1" interval burst now sf t
+  interval="$(unit_values "$unit" StartLimitIntervalSec | tail -1)"
+  burst="$(unit_values "$unit" StartLimitBurst | tail -1)"
+  interval="${interval:-10}" burst="${burst:-5}"
+  [[ "$interval" == 0 ]] && return 0
+  now="$(date +%s)"
+  sf="$(startsfile "$unit")"
+  local -a kept=()
+  if [[ -f "$sf" ]]; then
+    while read -r t; do
+      [[ -n "$t" ]] && ((now - t < interval)) && kept+=("$t")
+    done <"$sf"
+  fi
+  if ((${#kept[@]} >= burst)); then
+    printf '%s\n' "${kept[@]}" >"$sf"
+    echo "start-limit-hit" >"$STATE/${unit%.service}.failed"
+    echo "Job for ${unit%.service}.service failed." >&2
+    echo "See \"systemctl status ${unit%.service}.service\" for details. (start-limit-hit)" >&2
+    echo "stub-systemd: start request repeated too quickly, refusing to start (start-limit-hit)" >>"$(logfile "$unit")"
+    return 1
+  fi
+  kept+=("$now")
+  printf '%s\n' "${kept[@]}" >"$sf"
+}
+
+start() {
+  local unit="$1" log line
+  log="$(logfile "$unit")"
+  [[ -f "$(unit_path "$unit")" ]] || { echo "Unit $unit.service not found." >&2; return 5; }
+  is_active "$unit" && return 0
+  start_limit_ok "$unit" || return 1
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if ! run_exec "$unit" "$line" >>"$log" 2>&1; then
+      echo "stub-systemd: ExecStartPre failed: $line" >>"$log"
+      echo "Job for ${unit%.service}.service failed because the control process exited with error code." >&2
+      return 1
+    fi
+  done < <(unit_values "$unit" ExecStartPre)
+  line="$(unit_values "$unit" ExecStart | tail -1)"
+  # setsid: own process group, so stop can signal the master and its workers.
+  # Close inherited descriptors (e.g. a caller's flock), as systemd would.
+  (
+    for fd in /proc/self/fd/*; do
+      fd="${fd##*/}"
+      ((fd > 2)) && eval "exec $fd>&-" 2>/dev/null
+    done
+    exec setsid "$0" __run "$unit" "$line" >>"$log" 2>&1 </dev/null
+  ) &
+  echo $! >"$(pidfile "$unit")"
+  sleep 0.2
+  return 0
+}
+
+# Kill every process of the unit's User (the unit's leftovers; the tests run
+# nothing else as that user while the service stops).
+kill_user_processes() { # unit
+  local user uid p
+  user="$(unit_values "$1" User | tail -1)"
+  [[ -n "$user" ]] || return 0
+  uid="$(id -u "$user" 2>/dev/null)" || return 0
+  for p in /proc/[0-9]*; do
+    [[ "$(awk '/^Uid:/{print $2}' "$p/status" 2>/dev/null)" == "$uid" ]] && kill -KILL "${p##*/}" 2>/dev/null
+  done
+  return 0
+}
+
+stop() {
+  local unit="$1" pf pid
+  pf="$(pidfile "$unit")"
+  [[ -f "$pf" ]] || return 0
+  pid="$(cat "$pf")"
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  for _ in $(seq 1 150); do
+    alive "$pid" || break
+    sleep 0.1
+  done
+  kill -KILL -- "-$pid" 2>/dev/null || true
+  kill_user_processes "$unit"
+  rm -f "$pf"
+}
+
+cmd=""
+units=()
+now=0
+quiet=0
+for a in "$@"; do
+  case "$a" in
+  -q | --quiet) quiet=1 ;;
+  --no-pager | --no-block) ;;
+  --now) now=1 ;;
+  -*) ;;
+  *) if [[ -z "$cmd" ]]; then cmd="$a"; else units+=("${a%.service}"); fi ;;
+  esac
+done
+
+case "$cmd" in
+__run) exec 2>&1; run_exec "$2" "$3" exec ;;
+daemon-reload) ;;
+reset-failed) for u in "${units[@]}"; do rm -f "$(startsfile "$u")" "$STATE/$u.failed"; done ;;
+enable)
+  for u in "${units[@]}"; do
+    mkdir -p /etc/systemd/system/multi-user.target.wants
+    ln -sf "$(unit_path "$u")" /etc/systemd/system/multi-user.target.wants/
+    if [[ $now == 1 ]]; then start "$u" || exit 1; fi
+  done
+  ;;
+disable) for u in "${units[@]}"; do rm -f "/etc/systemd/system/multi-user.target.wants/$u.service"; done ;;
+start) for u in "${units[@]}"; do start "$u" || exit 1; done ;;
+stop) for u in "${units[@]}"; do stop "$u"; done ;;
+restart) for u in "${units[@]}"; do stop "$u"; start "$u" || exit 1; done ;;
+is-active)
+  for u in "${units[@]}"; do
+    is_active "$u" || { [[ $quiet == 1 ]] || echo inactive; exit 3; }
+  done
+  [[ $quiet == 1 ]] || echo active
+  ;;
+is-enabled) for u in "${units[@]}"; do [[ -e "/etc/systemd/system/multi-user.target.wants/$u.service" ]] || exit 1; done ;;
+status) for u in "${units[@]}"; do if is_active "$u"; then echo "$u: active (running)"; else echo "$u: inactive"; fi; tail -n 10 "$(logfile "$u")" 2>/dev/null; done ;;
+*) echo "stub systemctl: unsupported command: $*" >&2; exit 1 ;;
+esac

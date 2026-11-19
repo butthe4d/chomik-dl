@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 
 import pytest
@@ -7,6 +8,7 @@ from app.config import Settings
 from app.errors import MESSAGES, ChomikError
 from app.jobs import JobStore
 from tests.conftest import make_job
+from app import worker as worker_mod
 from app.worker import Worker
 
 
@@ -96,3 +98,105 @@ async def test_unexpected_exception_marks_failed(env):
     await w.run_once()
     got = store.get(job.id)
     assert got.status == "failed" and got.error_code == "download_failed"
+
+
+async def _run_storage(env, tmp_path, monkeypatch=None, *, require_mount, prep=None):
+    settings, store = env
+    settings = replace(settings, download_require_mount=require_mount)
+    if prep:
+        prep(settings.download_dir)
+    job = make_job(store, "https://chomikuj.pl/u/f,1.zip")
+    session = FakeSession()
+    w = Worker(settings, store, session, download=fake_download, retry_backoff=0)
+    await w.run_once()
+    return store.get(job.id), session
+
+
+async def test_require_mount_plain_dir_fails_before_resolve(env, tmp_path):
+    got, session = await _run_storage(env, tmp_path, require_mount=True, prep=lambda d: d.mkdir())
+    assert got.status == "failed"
+    assert got.error_code == "storage_unavailable"
+    assert got.error_message == MESSAGES["storage_unavailable"]
+    assert session.calls == 0
+
+
+async def test_require_mount_false_plain_dir_ok(env, tmp_path):
+    got, _ = await _run_storage(env, tmp_path, require_mount=False, prep=lambda d: d.mkdir())
+    assert got.status == "done"
+
+
+async def test_require_mount_false_missing_dir_created(env, tmp_path):
+    got, _ = await _run_storage(env, tmp_path, require_mount=False)
+    assert got.status == "done"
+
+
+async def test_missing_dir_fails(env, tmp_path):
+    got, session = await _run_storage(env, tmp_path, require_mount=True)
+    assert got.error_code == "storage_unavailable"
+    assert session.calls == 0
+
+
+async def test_unwritable_dir_fails(env, tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+
+    def prep(d):
+        d.mkdir()
+        d.chmod(0o500)
+
+    try:
+        got, session = await _run_storage(env, tmp_path, require_mount=False, prep=prep)
+    finally:
+        env[0].download_dir.chmod(0o700)
+    assert got.error_code == "storage_unavailable"
+    assert session.calls == 0
+
+
+async def test_require_mount_with_mount_ok(env, tmp_path, monkeypatch):
+    mi = tmp_path / "mountinfo"
+    mi.write_text(_mi_line(env[0].download_dir.resolve()))
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
+    got, _ = await _run_storage(env, tmp_path, require_mount=True, prep=lambda d: d.mkdir())
+    assert got.status == "done"
+
+
+def test_storage_unavailable_not_retryable():
+    from app.worker import RETRYABLE
+    assert "storage_unavailable" not in RETRYABLE
+
+
+def _mi_line(mp) -> str:
+    esc = str(mp).replace(" ", "\\040")
+    return f"36 35 98:0 /mnt1 {esc} rw,noatime - ext3 /dev/root rw\n"
+
+
+def test_is_mount_point_listed(tmp_path, monkeypatch):
+    mi = tmp_path / "mi"
+    mi.write_text("1 0 8:1 / / rw - ext4 /dev/sda1 rw\n" + _mi_line(tmp_path.resolve()))
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
+    assert worker_mod.is_mount_point(tmp_path) is True
+
+
+def test_is_mount_point_not_listed(tmp_path, monkeypatch):
+    mi = tmp_path / "mi"
+    mi.write_text("1 0 8:1 / / rw - ext4 /dev/sda1 rw\n")
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
+    assert worker_mod.is_mount_point(tmp_path) is False
+
+
+def test_is_mount_point_octal_space(tmp_path, monkeypatch):
+    d = tmp_path / "my data"
+    d.mkdir()
+    mi = tmp_path / "mi"
+    mi.write_text(_mi_line(d.resolve()))
+    assert "\\040" in mi.read_text()
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", mi)
+    assert worker_mod.is_mount_point(d) is True
+
+
+def test_is_mount_point_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker_mod, "MOUNTINFO", tmp_path / "missing")
+    monkeypatch.setattr(os.path, "ismount", lambda p: True)
+    assert worker_mod.is_mount_point(tmp_path) is True
+    monkeypatch.setattr(os.path, "ismount", lambda p: False)
+    assert worker_mod.is_mount_point(tmp_path) is False
