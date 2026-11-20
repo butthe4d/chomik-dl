@@ -141,3 +141,14 @@ def test_admin_buttons_in_tabs(page, site):
     assert page.locator("#jobs li .actions button").all_inner_texts()[:2] == ["Akceptuj", "Odrzuć"]
     tab(page, "Błędy").click()
     assert page.locator("#jobs li .actions button").all_inner_texts() == ["Ponów"]
+
+
+def test_all_tabs_visible_on_phone(browser, site):
+    ctx = browser.new_context(viewport={"width": 390, "height": 844})
+    p = ctx.new_page()
+    open_public(p, site)
+    for label in TAB_LABELS:
+        box = tab(p, label).bounding_box()
+        assert box["x"] >= 0 and box["x"] + box["width"] <= 390, label
+    assert p.evaluate("document.documentElement.scrollWidth") <= 390
+    ctx.close()
