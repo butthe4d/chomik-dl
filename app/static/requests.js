@@ -47,38 +47,90 @@ function actions(defs, j) {
   return box;
 }
 
+const PAGE = ADMIN ? "admin" : "public";
+const tabsNav = document.getElementById("tabs");
+const whoSelect = document.getElementById("who");
+const namesList = document.getElementById("names");
+let activeTab = load("tab") || "waiting";
+let who = load("who") || "";
+let lastJobs = [];
+let lastRequesters = null;
+let lastNames = null;
+
+function load(key) { try { return localStorage.getItem(`chomikdl_${key}_${PAGE}`); } catch (e) { return null; } }
+function save(key, value) { try { localStorage.setItem(`chomikdl_${key}_${PAGE}`, value); } catch (e) {} }
+const same = (a, b) => a !== null && a.length === b.length && a.every((x, i) => x === b[i]);
+if (!ListLogic.TABS.some(t => t.id === activeTab)) activeTab = "waiting";
+
+for (const t of ListLogic.TABS) {
+  const b = el("button", "tab", t.label);
+  b.type = "button";
+  b.setAttribute("role", "tab");
+  b.dataset.tab = t.id;
+  b.addEventListener("click", () => { activeTab = t.id; save("tab", t.id); render(lastJobs); });
+  tabsNav.append(b);
+}
+whoSelect.addEventListener("change", () => { who = whoSelect.value; save("who", who); render(lastJobs); });
+
+function updateRequesters(jobs) {
+  const names = ListLogic.requesters(jobs);
+  if (!same(lastRequesters, names)) {
+    lastRequesters = names;
+    whoSelect.replaceChildren(el("option", null, "wszyscy"));
+    whoSelect.options[0].value = "";
+    for (const n of names) { const o = el("option", null, n); o.value = n; whoSelect.append(o); }
+  }
+  who = ListLogic.resolveRequester(who, names);
+  whoSelect.value = who;
+}
+
+function updateSuggestions(jobs) {
+  if (!namesList) return;
+  const names = ListLogic.recentNames(jobs);
+  if (same(lastNames, names)) return;
+  lastNames = names;
+  namesList.replaceChildren(...names.map(n => { const o = el("option"); o.value = n; return o; }));
+}
+
+function card(j) {
+  const li = el("li", j.status);
+  const top = el("div", "top");
+  top.append(el("span", "name", j.filename || j.name || decodeURIComponent(j.url.split("/").pop())));
+  let status = LABELS[j.status] || j.status;
+  if (j.status === "downloading") status += j.bytes_total ? ` ${Math.floor(100 * j.bytes_done / j.bytes_total)}%` : ` ${fmt(j.bytes_done)}`;
+  if (j.status === "done") status += ` · ${fmt(j.bytes_done)}`;
+  top.append(el("span", "status", status));
+  li.append(top);
+  const meta = [j.size_text, j.folder].filter(Boolean).join(" · ");
+  if (meta) li.append(el("div", "sub", meta));
+  if (j.requested_by) li.append(el("div", "who", "prosi: " + j.requested_by));
+  if (j.description) li.append(describe(j));
+  li.append(el("div", "sub", j.url));
+  if (j.status === "downloading") {
+    const p = el("progress");
+    if (j.bytes_total) { p.max = j.bytes_total; p.value = j.bytes_done; }
+    li.append(p);
+  }
+  if (j.status === "failed" && j.error_message) li.append(el("div", "err", j.error_message));
+  if (ADMIN && j.status === "waiting") li.append(actions([["Akceptuj", "accept", ""], ["Odrzuć", "reject", "reject"]], j));
+  if (ADMIN && j.status === "failed") li.append(actions([["Ponów", "retry", ""]], j));
+  return li;
+}
+
 function render(jobs) {
+  lastJobs = jobs;
+  updateRequesters(jobs);
+  updateSuggestions(jobs);
+  const shown = ListLogic.filterByRequester(jobs, who);
+  const counts = ListLogic.countByTab(shown);
+  for (const b of tabsNav.children) {
+    const t = ListLogic.TABS.find(t => t.id === b.dataset.tab);
+    b.textContent = `${t.label} (${counts[t.id]})`;
+    b.setAttribute("aria-selected", String(t.id === activeTab));
+  }
+  const rows = ListLogic.inTab(shown, activeTab);
   const ul = document.getElementById("jobs");
-  ul.replaceChildren();
-  if (!jobs.length) { ul.append(el("li", "empty", "Brak próśb.")); return; }
-  if (ADMIN) {
-    const rank = j => j.status === "waiting" ? 0 : 1;
-    jobs = jobs.slice().sort((x, y) => rank(x) - rank(y) || y.id - x.id);
-  }
-  for (const j of jobs) {
-    const li = el("li", j.status);
-    const top = el("div", "top");
-    top.append(el("span", "name", j.filename || j.name || decodeURIComponent(j.url.split("/").pop())));
-    let status = LABELS[j.status] || j.status;
-    if (j.status === "downloading") status += j.bytes_total ? ` ${Math.floor(100 * j.bytes_done / j.bytes_total)}%` : ` ${fmt(j.bytes_done)}`;
-    if (j.status === "done") status += ` · ${fmt(j.bytes_done)}`;
-    top.append(el("span", "status", status));
-    li.append(top);
-    const meta = [j.size_text, j.folder].filter(Boolean).join(" · ");
-    if (meta) li.append(el("div", "sub", meta));
-    if (j.requested_by) li.append(el("div", "who", "prosi: " + j.requested_by));
-    if (j.description) li.append(describe(j));
-    li.append(el("div", "sub", j.url));
-    if (j.status === "downloading") {
-      const p = el("progress");
-      if (j.bytes_total) { p.max = j.bytes_total; p.value = j.bytes_done; }
-      li.append(p);
-    }
-    if (j.status === "failed" && j.error_message) li.append(el("div", "err", j.error_message));
-    if (ADMIN && j.status === "waiting") li.append(actions([["Akceptuj", "accept", ""], ["Odrzuć", "reject", "reject"]], j));
-    if (ADMIN && j.status === "failed") li.append(actions([["Ponów", "retry", ""]], j));
-    ul.append(li);
-  }
+  ul.replaceChildren(...(rows.length ? rows.map(card) : [el("li", "empty", "Brak próśb.")]));
 }
 
 async function refresh() {

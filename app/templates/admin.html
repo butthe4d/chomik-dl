@@ -14,8 +14,13 @@
     <button type="submit">Pobierz od razu</button>
   </form>
   <div id="msg" role="status"></div>
+  <div class="listbar">
+    <nav id="tabs" role="tablist" aria-label="Status"></nav>
+    <label class="whofilter">Kto prosił <select id="who"></select></label>
+  </div>
   <ul id="jobs"></ul>
 </main>
+<script src="/static/list-logic.js"></script>
 <script src="/static/requests.js"></script>
 </body>
 </html>
